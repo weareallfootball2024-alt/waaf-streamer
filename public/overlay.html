@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WAAF Stream Overlay</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        /* ПРОЗРАЧНЫЙ ФОН ДЛЯ OBS */
+        body { 
+            background-color: transparent; 
+            margin: 0; 
+            padding: 0; 
+            font-family: 'Arial Black', sans-serif; 
+            overflow: hidden;
+        }
+
+        /* КОНТЕЙНЕР ТАБЛО (ЛЕВЫЙ ВЕРХНИЙ УГОЛ) */
+        .scoreboard {
+            position: absolute;
+            top: 40px;
+            left: 40px;
+            display: flex;
+            align-items: stretch;
+            height: 70px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            animation: slideDown 1s ease-out;
+        }
+
+        /* БЛОК ТАЙМЕРА */
+        .timer-box {
+            background: #e31e24; /* КРАСНЫЙ */
+            color: white;
+            width: 80px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            border-top-left-radius: 8px;
+            border-bottom-left-radius: 8px;
+            z-index: 2;
+        }
+        .time-text { font-size: 20px; font-weight: 900; }
+        .period-text { font-size: 10px; text-transform: uppercase; }
+
+        /* БЛОК КОМАНД И СЧЕТА */
+        .teams-box {
+            background: white;
+            display: flex;
+            align-items: center;
+            padding: 0 15px;
+            position: relative;
+        }
+
+        .team {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 220px; /* Ширина места под команду */
+        }
+        
+        .team-right {
+            justify-content: flex-end;
+            text-align: right;
+        }
+
+        .team-logo {
+            width: 45px;
+            height: 45px;
+            object-fit: contain;
+        }
+
+        .team-name {
+            color: #333;
+            font-size: 18px;
+            font-weight: bold;
+            text-transform: uppercase;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 150px;
+        }
+
+        .scores {
+            background: #121212;
+            color: white;
+            font-size: 32px;
+            font-weight: 900;
+            padding: 0 15px;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 80px;
+            letter-spacing: 2px;
+            margin: 0 10px;
+            transform: skewX(-10deg); /* Стильный наклон */
+        }
+        .scores span { transform: skewX(10deg); } /* Возвращаем цифры прямо */
+
+        /* ВСПЛЫВАЮЩАЯ ПЛАШКА (ГОЛ/КАРТОЧКА) */
+        .notification {
+            position: absolute;
+            top: 80px; /* Под табло */
+            left: 40px;
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            border-left: 5px solid white;
+            transform: translateX(-150%); /* Скрыто слева */
+            transition: transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+        }
+
+        .notification.show { transform: translateX(0); }
+        .notify-icon { font-size: 30px; }
+        .notify-title { font-size: 14px; color: #aaa; text-transform: uppercase; }
+        .notify-player { font-size: 20px; font-weight: bold; }
+        .notify-team-logo { width: 40px; height: 40px; object-fit: contain; }
+
+        /* Цвета событий */
+        .event-goal { border-left-color: #4cd964; }
+        .event-yellow { border-left-color: #ffcc00; }
+        .event-red { border-left-color: #cc0000; }
+
+        @keyframes slideDown { from { transform: translateY(-100%); } to { transform: translateY(0); } }
+    </style>
+</head>
+<body>
+
+    <div class="scoreboard" id="scoreboard" style="display:none;">
+        <div class="timer-box">
+            <div class="time-text" id="timer">00:00</div>
+            <div class="period-text" id="period">1 Тайм</div>
+        </div>
+
+        <div class="teams-box">
+            <div class="team">
+                <img src="" id="logoHome" class="team-logo" onerror="this.style.display='none'">
+                <span class="team-name" id="nameHome">HOME</span>
+            </div>
+
+            <div class="scores">
+                <span id="score">0 : 0</span>
+            </div>
+
+            <div class="team team-right">
+                <span class="team-name" id="nameAway">AWAY</span>
+                <img src="" id="logoAway" class="team-logo" onerror="this.style.display='none'">
+            </div>
+        </div>
+    </div>
+
+    <div class="notification" id="notifyBox">
+        <img id="notifyLogo" class="notify-team-logo">
+        <div class="notify-icon" id="notifyIcon">⚽</div>
+        <div>
+            <div class="notify-title" id="notifyTitle">ГОЛ!</div>
+            <div class="notify-player" id="notifyPlayer">Иванов Иван</div>
+        </div>
+    </div>
+
+    <script>
+        // 1. Получаем ID матча из URL (overlay.html?id=1)
+        const params = new URLSearchParams(window.location.search);
+        const MATCH_ID = params.get('id');
+
+        if (!MATCH_ID) {
+            document.body.innerHTML = '<h1 style="color:white; background:black;">Нет ID матча в ссылке! (?id=...)</h1>';
+        } else {
+            initOverlay();
+        }
+
+        // Глобальные переменные для таймера
+        let timerVal = 0;
+        let isPaused = true;
+        let sportType = 'football';
+        let halfDuration = 20;
+        let timerInterval = null;
+
+        async function initOverlay() {
+            const socket = io();
+
+            // 1. Загружаем данные матча (названия, лого)
+            try {
+                const res = await fetch('/api/matches/active');
+                const matches = await res.json();
+                const match = matches.find(m => m.id == MATCH_ID);
+                
+                if (match) {
+                    document.getElementById('scoreboard').style.display = 'flex';
+                    updateStaticData(match);
+                    // Инициализируем состояние
+                    updateDynamicData(match.score_home, match.score_away, match.timer_seconds, match.is_paused, match.current_period);
+                }
+            } catch (e) { console.error("Ошибка загрузки матча", e); }
+
+            // 2. Слушаем сокет (Живые обновления)
+            socket.on('match_update', (data) => {
+                if (data.matchId != MATCH_ID) return;
+
+                // Обновляем счет и таймер
+                updateDynamicData(data.score_home, data.score_away, data.timer_seconds, data.is_paused, data.current_period);
+
+                // Если есть событие (Гол, Карточка) - показываем плашку
+                if (data.lastEvent) {
+                    showNotification(data.lastEvent);
+                }
+            });
+
+            // Запускаем локальный таймер (чтобы секунды тикали плавно)
+            startLocalTimer();
+        }
+
+        function updateStaticData(match) {
+            document.getElementById('nameHome').innerText = match.team_home;
+            document.getElementById('nameAway').innerText = match.team_away;
+            if(match.logo_home) document.getElementById('logoHome').src = match.logo_home;
+            if(match.logo_away) document.getElementById('logoAway').src = match.logo_away;
+            
+            sportType = match.sport_type || 'football';
+            halfDuration = match.half_duration || 20;
+        }
+
+        function updateDynamicData(sH, sA, sec, paused, per) {
+            document.getElementById('score').innerHTML = `<span>${sH} : ${sA}</span>`;
+            
+            // Обновляем глобальные переменные таймера
+            if (sec !== undefined) timerVal = sec;
+            if (paused !== undefined) isPaused = !!paused;
+            
+            // Текст периода
+            let pText = "";
+            if (per == 0) pText = "РАЗМИНКА";
+            else if (per == 1) pText = "1 ТАЙМ";
+            else if (per == 2) pText = "ПЕРЕРЫВ";
+            else if (per == 3) pText = "2 ТАЙМ";
+            else pText = "КОНЕЦ";
+            document.getElementById('period').innerText = pText;
+
+            // Сразу отрисовываем время
+            drawTimer();
+        }
+
+        function startLocalTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                if (!isPaused) {
+                    if (sportType === 'futsal') {
+                        if (timerVal > 0) timerVal--;
+                    } else {
+                        timerVal++;
+                    }
+                    drawTimer();
+                }
+            }, 1000);
+        }
+
+        function drawTimer() {
+            let m = Math.floor(timerVal / 60);
+            let s = timerVal % 60;
+            // Для футзала: если 20:00 (начало), а не 19:59
+            // Но мы просто форматируем
+            document.getElementById('timer').innerText = 
+                `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        }
+
+        // --- ЛОГИКА УВЕДОМЛЕНИЙ ---
+        let notifyTimeout;
+        async function showNotification(evt) {
+            const box = document.getElementById('notifyBox');
+            const title = document.getElementById('notifyTitle');
+            const player = document.getElementById('notifyPlayer');
+            const icon = document.getElementById('notifyIcon');
+            const logo = document.getElementById('notifyLogo');
+
+            // Определяем тип
+            let typeClass = '';
+            let iconChar = '';
+            let titleText = '';
+
+            if (evt.event_type === 'goal' || evt.event_type === 'penalty') {
+                typeClass = 'event-goal'; iconChar = '⚽'; titleText = 'ГОЛ!';
+            } else if (evt.event_type === 'yellow_card') {
+                typeClass = 'event-yellow'; iconChar = '🟨'; titleText = 'ПРЕДУПРЕЖДЕНИЕ';
+            } else if (evt.event_type === 'red_card' || evt.event_type === 'second_yellow_card') {
+                typeClass = 'event-red'; iconChar = '🟥'; titleText = 'УДАЛЕНИЕ';
+            } else {
+                return; // Остальное не показываем
+            }
+
+            // Загружаем имя игрока (если есть ID, можно сделать доп. запрос, но пока возьмем из сокета если передадим, или заглушку)
+            // В нашем текущем server.js lastEvent не содержит имени игрока, только ID.
+            // Для красоты нужно бы доработать сервер, чтобы он отдавал { player_name: "Ivanov" }
+            // Пока сделаем запрос за именем
+            let playerName = "Игрок №" + (evt.player_id || "?");
+            
+            // Попытаемся получить состав матча чтобы найти имя
+            try {
+                // Это не очень эффективно, но работает. Лучше потом передавать имя в сокете.
+                const rosterRes = await fetch(`/api/match/${evt.match_id}/roster`);
+                const roster = await rosterRes.json();
+                const p = roster.find(r => r.id == evt.player_id);
+                if (p) playerName = `${p.number}. ${p.name}`;
+            } catch(e) {}
+
+            // Настраиваем UI
+            box.className = `notification ${typeClass} show`;
+            icon.innerText = iconChar;
+            title.innerText = titleText;
+            player.innerText = playerName;
+
+            // Логотип команды
+            // Тут тоже нужно знать, чья команда. evt.team_id у нас есть.
+            // Можно найти лого из статики.
+            // Упрощение: пока без лого в попапе, или возьмем лого дома/гостей сравнением ID
+            // ... (логика поиска логотипа)
+
+            // Скрываем через 5 секунд
+            clearTimeout(notifyTimeout);
+            notifyTimeout = setTimeout(() => {
+                box.classList.remove('show');
+            }, 5000);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,64 @@
+{
+  "expo": {
+    "name": "waaf-streamer",
+    "slug": "waaf-streamer",
+    "version": "1.0.0",
+    "orientation": "landscape",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.waaf.waafstreamer",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Разрешите доступ к камере для трансляции матчей.",
+        "NSMicrophoneUsageDescription": "Разрешите доступ к микрофону для звука в трансляции."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.waaf.waafstreamer",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Разрешите доступ к камере для трансляции матчей.",
+          "microphonePermission": "Разрешите доступ к микрофону для звука в трансляции.",
+          "recordAudioAndroid": true
+        }
+      ],
+      "expo-screen-orientation",
+      "expo-dev-client"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "7c864470-56e0-4743-be77-56f8ccf49f70"
+      }
+    }
+  }
+}
