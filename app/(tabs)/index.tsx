@@ -23,6 +23,30 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import { API_URL, getRtmpLiveUrl } from '../../constants/api';
 import { formatTimer, getActualSeconds } from '../../utils/matchTimer';
 
+function buildOperatorHeaders(sessionToken, accessCode) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (sessionToken) headers.Authorization = `Bearer ${sessionToken}`;
+  return headers;
+}
+
+function operatorFetch(path, sessionToken, accessCode, options = {}) {
+  const headers = { ...buildOperatorHeaders(sessionToken, accessCode), ...(options.headers || {}) };
+  let body = options.body;
+  const method = options.method || 'GET';
+  if (method !== 'GET' && !body && accessCode) {
+    body = JSON.stringify({ access_code: accessCode });
+  } else if (body && accessCode) {
+    try {
+      const parsed = JSON.parse(body);
+      parsed.access_code = accessCode;
+      body = JSON.stringify(parsed);
+    } catch {
+      /* keep original body */
+    }
+  }
+  return fetch(`${API_URL}${path}`, { ...options, headers, body });
+}
+
 const { AudioHelper } = NativeModules;
 
 // ==================================================
@@ -136,8 +160,8 @@ function PinEntryScreen({ match, onSuccess, onBack }) {
                 if (Number(data.matchId) !== Number(match.id)) {
                     Alert.alert("Ошибка", "Код от другого матча!");
                 } else {
-                    // 🔥 Передаём access_code для авторизации последующих запросов
-                    onSuccess(match, code.toUpperCase()); 
+                    const sessionToken = data.sessionToken || data.token || null;
+                    onSuccess(match, code.toUpperCase(), sessionToken); 
                 }
             } else {
                 Alert.alert("Ошибка", "Неверный код");
@@ -204,16 +228,17 @@ export default function App() {
       setCurrentScreen('step2_list');
   };
 
-  const [matchAccessCode, setMatchAccessCode] = useState<string | null>(null); // 🔥 access_code для авторизации пульта
+  const [matchAccessCode, setMatchAccessCode] = useState<string | null>(null);
+  const [matchSessionToken, setMatchSessionToken] = useState<string | null>(null); // 🔥 access_code для авторизации пульта
 
   const goToPin = (match) => {
       setSelectedMatch(match);
       setCurrentScreen('step3_pin');
   };
 
-  const goToGame = async (match, accessCode?: string) => {
-      // 🔥 Сохраняем access_code при входе через PIN
+  const goToGame = async (match, accessCode, sessionToken) => {
       if (accessCode) setMatchAccessCode(accessCode);
+      if (sessionToken) setMatchSessionToken(sessionToken);
       try {
           const res = await fetch(`${API_URL}/api/match/${match.id}/roster`);
           const roster = await res.json();
@@ -256,7 +281,7 @@ export default function App() {
   if (currentScreen === 'step3_pin') return <PinEntryScreen match={selectedMatch} onSuccess={goToGame} onBack={() => setCurrentScreen('step2_list')} />;
   if (currentScreen === 'roster') return <RosterEditScreen match={selectedMatch} allPlayers={allPlayers} onSave={handleRosterSaved} onBack={() => setCurrentScreen('step2_list')} />;
   
-  if (currentScreen === 'control') return <MatchControlScreen match={selectedMatch} matchRoster={matchRoster} onBack={handleBackToSchedule} accessCode={matchAccessCode} />;
+  if (currentScreen === 'control') return <MatchControlScreen match={selectedMatch} matchRoster={matchRoster} onBack={handleBackToSchedule} accessCode={matchAccessCode} sessionToken={matchSessionToken} />;
 
   return null;
 }
@@ -333,8 +358,9 @@ function RosterEditScreen({ match, allPlayers, onSave, onBack }) {
 // ==================================================
 // MATCH CONTROL SCREEN (ГОЛЫ + АССИСТЕНТЫ + JAVA ЗВУК)
 // ==================================================
-function MatchControlScreen({ match, matchRoster, onBack, accessCode = null }) {
+function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, sessionToken = null }) {
   const videoRef = useRef(null);
+  const opFetch = (path, options = {}) => operatorFetch(path, sessionToken, accessCode, options);
   
   // Состояния
   const [isStreaming, setIsStreaming] = useState(false); 
@@ -513,9 +539,8 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null }) {
       // 🔥 Авторизация пульта: access_code (PIN-режим)
       if (accessCode) payload.access_code = accessCode;
 
-      fetch(`${API_URL}/api/match/${match.id}/update`, { 
+      opFetch(`/api/match/${match.id}/update`, { 
           method: 'POST', 
-          headers: { 'Content-Type': 'application/json' }, 
           body: JSON.stringify(payload) 
       }).catch(e => console.log("Sync error", e));
   };
@@ -577,7 +602,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null }) {
           setPeriod(1);
           setDisplaySeconds(startBase);
           // Отправляем на сервер
-          fetch(`${API_URL}/api/match/${match.id}/timer/start`, {
+          opFetch(`/api/match/${match.id}/timer/start`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ period: 1, timer_base_seconds: startBase, timer_direction: direction })
           }).catch(() => {});
@@ -589,14 +614,14 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null }) {
           setTimerUpdatedAt(null);
           setIsTimerRunning(false);
           setDisplaySeconds(pausedBase);
-          fetch(`${API_URL}/api/match/${match.id}/timer/pause`, { method: 'POST' }).catch(() => {});
+          opFetch(`/api/match/${match.id}/timer/pause`, { method: 'POST' }).catch(() => {});
           sendUpdate({});
       }
       else if (action === 'resume') {
           const now = Date.now();
           setTimerUpdatedAt(now);
           setIsTimerRunning(true);
-          fetch(`${API_URL}/api/match/${match.id}/timer/start`, {
+          opFetch(`/api/match/${match.id}/timer/start`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ period, timer_base_seconds: timerBase, timer_direction: timerDirection })
           }).catch(() => {});
@@ -609,7 +634,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null }) {
           setIsTimerRunning(false);
           setDisplaySeconds(pausedBase);
           setPeriod(2);
-          fetch(`${API_URL}/api/match/${match.id}/timer/pause`, { method: 'POST' }).catch(() => {});
+          opFetch(`/api/match/${match.id}/timer/pause`, { method: 'POST' }).catch(() => {});
           sendUpdate({ period: 2 }, 'end_h1');
       }
       else if (action === 'start_h2') {
@@ -623,7 +648,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null }) {
           setTimerDirection(direction);
           setPeriod(3);
           setDisplaySeconds(startBase);
-          fetch(`${API_URL}/api/match/${match.id}/timer/start`, {
+          opFetch(`/api/match/${match.id}/timer/start`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ period: 3, timer_base_seconds: startBase, timer_direction: direction })
           }).catch(() => {});
@@ -635,7 +660,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null }) {
           setTimerUpdatedAt(null);
           setIsTimerRunning(false);
           setDisplaySeconds(pausedBase);
-          fetch(`${API_URL}/api/match/${match.id}/timer/pause`, { method: 'POST' }).catch(() => {});
+          opFetch(`/api/match/${match.id}/timer/pause`, { method: 'POST' }).catch(() => {});
           // Проверяем ничью
           const isDraw = score.home === score.away;
           if (isDraw && (drawEt || drawPen)) {
@@ -656,7 +681,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null }) {
           setIsTimerRunning(false);
           setDisplaySeconds(pausedBase);
           setPeriod(8);
-          fetch(`${API_URL}/api/match/${match.id}/timer/pause`, { method: 'POST' }).catch(() => {});
+          opFetch(`/api/match/${match.id}/timer/pause`, { method: 'POST' }).catch(() => {});
           if (isStreaming) { videoRef.current?.stopStreaming(); setIsStreaming(false); }
           sendUpdate({ period: 8, status: 'finished' }, 'end_match');
           Alert.alert("Матч завершен");
@@ -672,7 +697,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null }) {
           setTimerDirection(direction);
           setPeriod(5);
           setDisplaySeconds(startBase);
-          fetch(`${API_URL}/api/match/${match.id}/timer/start`, {
+          opFetch(`/api/match/${match.id}/timer/start`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ period: 5, timer_base_seconds: startBase, timer_direction: direction })
           }).catch(() => {});
@@ -685,7 +710,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null }) {
           setIsTimerRunning(false);
           setDisplaySeconds(pausedBase);
           setPeriod(6);
-          fetch(`${API_URL}/api/match/${match.id}/timer/pause`, { method: 'POST' }).catch(() => {});
+          opFetch(`/api/match/${match.id}/timer/pause`, { method: 'POST' }).catch(() => {});
           sendUpdate({ period: 6 }, 'end_et1');
           // Автоматически запускаем ДВ2
           setTimeout(() => handleTimerAction('start_et2'), 1500);
@@ -701,7 +726,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null }) {
           setTimerDirection(direction);
           setPeriod(6);
           setDisplaySeconds(startBase);
-          fetch(`${API_URL}/api/match/${match.id}/timer/start`, {
+          opFetch(`/api/match/${match.id}/timer/start`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ period: 6, timer_base_seconds: startBase, timer_direction: direction })
           }).catch(() => {});
@@ -713,7 +738,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null }) {
           setTimerUpdatedAt(null);
           setIsTimerRunning(false);
           setDisplaySeconds(pausedBase);
-          fetch(`${API_URL}/api/match/${match.id}/timer/pause`, { method: 'POST' }).catch(() => {});
+          opFetch(`/api/match/${match.id}/timer/pause`, { method: 'POST' }).catch(() => {});
           const isDraw = score.home === score.away;
           if (isDraw && drawPen) {
               setPeriod(7);
@@ -745,7 +770,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null }) {
               { text: "Да", onPress: async () => {
                   try {
                       setIsLoading(true);
-                      const res = await fetch(`${API_URL}/api/match/${match.id}/undo`, { method: 'POST' });
+                      const res = await opFetch(`/api/match/${match.id}/undo`, { method: 'POST' });
                       const data = await res.json();
                       
                       if (data.success) {
@@ -965,7 +990,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null }) {
                         setTimerUpdatedAt(null);
                         setIsTimerRunning(false);
                         setPeriod(8);
-                        fetch(`${API_URL}/api/match/${match.id}/timer/pause`, { method: 'POST' }).catch(() => {});
+                        opFetch(`/api/match/${match.id}/timer/pause`, { method: 'POST' }).catch(() => {});
                         if (isStreaming) { videoRef.current?.stopStreaming(); setIsStreaming(false); }
                         sendUpdate({
                             period: 8,
