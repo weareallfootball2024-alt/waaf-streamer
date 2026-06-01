@@ -20,56 +20,55 @@ import {
 import { ApiVideoLiveStreamView } from '@api.video/react-native-livestream';
 import * as ScreenOrientation from 'expo-screen-orientation';
 
-import { API_URL, getRtmpLiveUrl } from '../../constants/api';
+import { API_URL } from '../../constants/api';
+import { parseOperatorToken } from '../../constants/streamPlatforms';
+import { StreamSettingsScreen } from '../../components/StreamSettingsScreen';
+import {
+  fetchTournamentMatches,
+  operatorFetch,
+  resolveOperatorToken,
+} from '../../services/operatorFetch';
+import {
+  getActiveRtmpConfig,
+  loadStreamSettings,
+} from '../../services/streamConfig';
 import { formatTimer, getActualSeconds } from '../../utils/matchTimer';
-
-function buildOperatorHeaders(sessionToken, accessCode) {
-  const headers = { 'Content-Type': 'application/json' };
-  if (sessionToken) headers.Authorization = `Bearer ${sessionToken}`;
-  return headers;
-}
-
-function operatorFetch(path, sessionToken, accessCode, options = {}) {
-  const headers = { ...buildOperatorHeaders(sessionToken, accessCode), ...(options.headers || {}) };
-  let body = options.body;
-  const method = options.method || 'GET';
-  if (method !== 'GET' && !body && accessCode) {
-    body = JSON.stringify({ access_code: accessCode });
-  } else if (body && accessCode) {
-    try {
-      const parsed = JSON.parse(body);
-      parsed.access_code = accessCode;
-      body = JSON.stringify(parsed);
-    } catch {
-      /* keep original body */
-    }
-  }
-  return fetch(`${API_URL}${path}`, { ...options, headers, body });
-}
+import * as Linking from 'expo-linking';
 
 const { AudioHelper } = NativeModules;
 
 // ==================================================
 // ЭКРАН 1: ВВОД ID ТУРНИРА
 // ==================================================
-function TournamentLoginScreen({ onNext }) {
+function TournamentLoginScreen({ onNext, onOpenSettings, initialToken = '' }) {
+    const [tokenInput, setTokenInput] = useState(initialToken);
     const [tournId, setTournId] = useState('');
     const [loading, setLoading] = useState(false);
+    const [showIdMode, setShowIdMode] = useState(false);
+
+    const handleTokenLogin = async () => {
+        const token = parseOperatorToken(tokenInput);
+        if (!token) { Alert.alert("Ошибка", "Вставьте ссылку или токен от организатора"); return; }
+        setLoading(true);
+        try {
+            const { tournamentId } = await resolveOperatorToken(token);
+            const matches = await fetchTournamentMatches(String(tournamentId));
+            onNext(matches, String(tournamentId), token);
+        } catch (e) {
+            Alert.alert("Ошибка", e instanceof Error ? e.message : "Ссылка недействительна");
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const handleSearch = async () => {
         if (!tournId) { Alert.alert("Ошибка", "Введите ID турнира"); return; }
         setLoading(true);
         try {
-            const res = await fetch(`${API_URL}/api/tournaments/${tournId}/matches`);
-            if (res.status === 404) {
-                Alert.alert("Не найдено", "Неверный ID или нет матчей");
-                setLoading(false);
-                return;
-            }
-            const matches = await res.json();
-            onNext(matches, tournId); // 🔥 ИСПРАВЛЕНО: Передаем tournId дальше
+            const matches = await fetchTournamentMatches(tournId);
+            onNext(matches, tournId, null);
         } catch (e) {
-            Alert.alert("Ошибка сети", "Сервер недоступен");
+            Alert.alert("Не найдено", e instanceof Error ? e.message : "Неверный ID или нет матчей");
         } finally {
             setLoading(false);
         }
@@ -85,22 +84,46 @@ function TournamentLoginScreen({ onNext }) {
     return (
         <View style={styles.centerContainer}>
             <StatusBar hidden />
+            <TouchableOpacity style={styles.settingsBtnPos} onPress={onOpenSettings}>
+                <Text style={styles.settingsBtnText}>⚙ НАСТРОЙКИ</Text>
+            </TouchableOpacity>
             <TouchableOpacity style={styles.exitBtnPos} onPress={handleExit}>
                 <Text style={styles.exitBtnText}>🚪 ВЫХОД</Text>
             </TouchableOpacity>
 
-            <Text style={styles.title}>ШАГ 1: ID ТУРНИРА</Text>
-            <TextInput 
-                style={styles.inputBig} 
-                placeholder="ID (напр: 1)" 
-                placeholderTextColor="#666" 
-                keyboardType="numeric"
-                value={tournId}
-                onChangeText={setTournId}
+            <Text style={styles.title}>WAAF STREAMER</Text>
+            <Text style={styles.subTitle}>Ссылка от организатора</Text>
+            <TextInput
+                style={[styles.inputBig, { fontSize: 14, minHeight: 48 }]}
+                placeholder="https://.../?token=... или токен"
+                placeholderTextColor="#666"
+                value={tokenInput}
+                onChangeText={setTokenInput}
+                autoCapitalize="none"
             />
-            <TouchableOpacity style={styles.btnPrimary} onPress={handleSearch} disabled={loading}>
-                {loading ? <ActivityIndicator color="white"/> : <Text style={styles.btnText}>НАЙТИ МАТЧИ</Text>}
+            <TouchableOpacity style={styles.btnPrimary} onPress={handleTokenLogin} disabled={loading}>
+                {loading ? <ActivityIndicator color="white"/> : <Text style={styles.btnText}>ОТКРЫТЬ ТУРНИР</Text>}
             </TouchableOpacity>
+
+            <TouchableOpacity onPress={() => setShowIdMode(!showIdMode)} style={{ marginTop: 20 }}>
+                <Text style={{ color: '#888', fontSize: 13 }}>{showIdMode ? '▲ Скрыть ID турнира' : '▼ Или ввести ID турнира'}</Text>
+            </TouchableOpacity>
+
+            {showIdMode && (
+                <>
+                    <TextInput
+                        style={[styles.inputBig, { marginTop: 12 }]}
+                        placeholder="ID (напр: 1)"
+                        placeholderTextColor="#666"
+                        keyboardType="numeric"
+                        value={tournId}
+                        onChangeText={setTournId}
+                    />
+                    <TouchableOpacity style={[styles.btnPrimary, { backgroundColor: '#555' }]} onPress={handleSearch} disabled={loading}>
+                        {loading ? <ActivityIndicator color="white"/> : <Text style={styles.btnText}>НАЙТИ МАТЧИ</Text>}
+                    </TouchableOpacity>
+                </>
+            )}
         </View>
     );
 }
@@ -108,11 +131,11 @@ function TournamentLoginScreen({ onNext }) {
 // ==================================================
 // ЭКРАН 2: ВЫБОР МАТЧА
 // ==================================================
-function MatchSelectionScreen({ matches, onSelect, onBack }) {
+function MatchSelectionScreen({ matches, onSelect, onBack, tokenMode = false }) {
     return (
         <SafeAreaView style={styles.listContainer}>
             <View style={styles.listHeader}>
-                <TouchableOpacity onPress={onBack} style={styles.backBtnSmall}><Text style={{color:'white', fontWeight:'bold'}}>НАЗАД (ID)</Text></TouchableOpacity>
+                <TouchableOpacity onPress={onBack} style={styles.backBtnSmall}><Text style={{color:'white', fontWeight:'bold'}}>{tokenMode ? 'НАЗАД' : 'НАЗАД (ID)'}</Text></TouchableOpacity>
                 <Text style={styles.titleSmall}>РАСПИСАНИЕ</Text>
                 <View style={{width:50}}/>
             </View>
@@ -206,12 +229,32 @@ export default function App() {
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [matchRoster, setMatchRoster] = useState([]); 
   const [allPlayers, setAllPlayers] = useState([]);  
-  const [activeTournId, setActiveTournId] = useState(null); // 🔥 ИСПРАВЛЕНО: Храним ID турнира для автообновления
+  const [activeTournId, setActiveTournId] = useState(null);
+  const [operatorToken, setOperatorToken] = useState<string | null>(null);
+  const [pendingLinkToken, setPendingLinkToken] = useState('');
+  const [settingsReturnScreen, setSettingsReturnScreen] = useState('step1_tourn');
+
+  const openSettings = (returnTo = 'step1_tourn') => {
+      setSettingsReturnScreen(returnTo);
+      setCurrentScreen('settings');
+  };
 
   useEffect(() => {
     async function lock() { await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE); }
     lock();
-    fetchAllPlayers(); 
+    fetchAllPlayers();
+
+    const handleUrl = (url: string | null) => {
+      if (!url) return;
+      const parsed = Linking.parse(url);
+      const token = parsed.queryParams?.token;
+      if (token && !Array.isArray(token)) {
+        setPendingLinkToken(String(token));
+      }
+    };
+    Linking.getInitialURL().then(handleUrl);
+    const sub = Linking.addEventListener('url', ({ url }) => handleUrl(url));
+    return () => sub.remove();
   }, []);
 
   const fetchAllPlayers = async () => {
@@ -222,21 +265,17 @@ export default function App() {
     } catch (e) {}
   };
 
-  const goToMatchList = (matches, tournId) => {
+  const goToMatchList = (matches, tournId, token: string | null = null) => {
       setFoundMatches(matches);
       if (tournId) setActiveTournId(tournId);
+      setOperatorToken(token);
       setCurrentScreen('step2_list');
   };
 
   const [matchAccessCode, setMatchAccessCode] = useState<string | null>(null);
-  const [matchSessionToken, setMatchSessionToken] = useState<string | null>(null); // 🔥 access_code для авторизации пульта
+  const [matchSessionToken, setMatchSessionToken] = useState<string | null>(null);
 
-  const goToPin = (match) => {
-      setSelectedMatch(match);
-      setCurrentScreen('step3_pin');
-  };
-
-  const goToGame = async (match, accessCode, sessionToken) => {
+  const enterMatch = async (match, accessCode: string | null, sessionToken: string | null) => {
       if (accessCode) setMatchAccessCode(accessCode);
       if (sessionToken) setMatchSessionToken(sessionToken);
       try {
@@ -251,6 +290,20 @@ export default function App() {
       } catch (e) { Alert.alert("Ошибка протокола"); }
   };
 
+  const goToPin = (match) => {
+      setSelectedMatch(match);
+      if (operatorToken) {
+          enterMatch(match, null, null);
+          return;
+      }
+      setCurrentScreen('step3_pin');
+  };
+
+  const goToGame = async (match, accessCode, sessionToken) => {
+      setSelectedMatch(match);
+      await enterMatch(match, accessCode, sessionToken);
+  };
+
   const handleRosterSaved = (newRoster) => {
       setMatchRoster(newRoster);
       setCurrentScreen('control');
@@ -259,9 +312,9 @@ export default function App() {
   const handleBackToStart = () => {
       setCurrentScreen('step1_tourn');
       setSelectedMatch(null);
+      setOperatorToken(null);
   };
 
-  // 🔥 ИСПРАВЛЕНО: Автообновление расписания при выходе из пульта
   const handleBackToSchedule = async () => {
       if (activeTournId) {
           try {
@@ -276,12 +329,56 @@ export default function App() {
       setSelectedMatch(null);
   };
 
-  if (currentScreen === 'step1_tourn') return <TournamentLoginScreen onNext={goToMatchList} />;
-  if (currentScreen === 'step2_list') return <MatchSelectionScreen matches={foundMatches} onSelect={goToPin} onBack={handleBackToStart} />;
+  if (currentScreen === 'settings') {
+      return <StreamSettingsScreen onClose={() => setCurrentScreen(settingsReturnScreen)} />;
+  }
+  if (currentScreen === 'step1_tourn') {
+      return (
+          <TournamentLoginScreen
+              onNext={goToMatchList}
+              onOpenSettings={() => openSettings('step1_tourn')}
+              initialToken={pendingLinkToken}
+          />
+      );
+  }
+  if (currentScreen === 'step2_list') {
+      return (
+          <MatchSelectionScreen
+              matches={foundMatches}
+              onSelect={goToPin}
+              onBack={handleBackToStart}
+              tokenMode={!!operatorToken}
+          />
+      );
+  }
   if (currentScreen === 'step3_pin') return <PinEntryScreen match={selectedMatch} onSuccess={goToGame} onBack={() => setCurrentScreen('step2_list')} />;
-  if (currentScreen === 'roster') return <RosterEditScreen match={selectedMatch} allPlayers={allPlayers} onSave={handleRosterSaved} onBack={() => setCurrentScreen('step2_list')} />;
+  if (currentScreen === 'roster') {
+      return (
+          <RosterEditScreen
+              match={selectedMatch}
+              allPlayers={allPlayers}
+              onSave={handleRosterSaved}
+              onBack={() => setCurrentScreen('step2_list')}
+              accessCode={matchAccessCode}
+              sessionToken={matchSessionToken}
+              operatorToken={operatorToken}
+          />
+      );
+  }
   
-  if (currentScreen === 'control') return <MatchControlScreen match={selectedMatch} matchRoster={matchRoster} onBack={handleBackToSchedule} accessCode={matchAccessCode} sessionToken={matchSessionToken} />;
+  if (currentScreen === 'control') {
+      return (
+          <MatchControlScreen
+              match={selectedMatch}
+              matchRoster={matchRoster}
+              onBack={handleBackToSchedule}
+              accessCode={matchAccessCode}
+              sessionToken={matchSessionToken}
+              operatorToken={operatorToken}
+              onOpenSettings={() => openSettings('control')}
+          />
+      );
+  }
 
   return null;
 }
@@ -289,10 +386,11 @@ export default function App() {
 // ==================================================
 // ROSTER EDIT SCREEN
 // ==================================================
-function RosterEditScreen({ match, allPlayers, onSave, onBack }) {
+function RosterEditScreen({ match, allPlayers, onSave, onBack, accessCode = null, sessionToken = null, operatorToken = null }) {
     const [activeTab, setActiveTab] = useState('home');
     const [selectedPlayers, setSelectedPlayers] = useState({});
     const [saving, setSaving] = useState(false);
+    const opAuth = { sessionToken, accessCode, operatorToken };
 
     const currentTeamName = activeTab === 'home' ? match.team_home : match.team_away;
     const normalize = (str) => str ? str.toString().trim().toLowerCase() : '';
@@ -314,9 +412,13 @@ function RosterEditScreen({ match, allPlayers, onSave, onBack }) {
         setSaving(true);
         const playersArray = Object.values(selectedPlayers).map(p => ({ player_id: p.player_id, team_id: p.team_id, number: parseInt(p.number) || 0 }));
         try {
-            await fetch(`${API_URL}/api/match/${match.id}/roster`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ players: playersArray })
+            const res = await operatorFetch(`/api/match/${match.id}/roster`, opAuth, {
+                method: 'POST', body: JSON.stringify({ players: playersArray }),
             });
+            if (!res.ok) {
+                Alert.alert("Ошибка", "Не удалось сохранить заявку");
+                return;
+            }
             const newRosterRes = await fetch(`${API_URL}/api/match/${match.id}/roster`);
             const newRoster = await newRosterRes.json();
             onSave(newRoster);
@@ -335,7 +437,7 @@ function RosterEditScreen({ match, allPlayers, onSave, onBack }) {
                 <TouchableOpacity style={[styles.tab, activeTab === 'away' && styles.activeTab]} onPress={() => setActiveTab('away')}><Text style={[styles.tabText, activeTab === 'away' && styles.activeTabText]}>{match.team_away}</Text></TouchableOpacity>
             </View>
             <ScrollView style={styles.playerList}>
-                {teamPlayers.length === 0 && <Text style={styles.emptyText}>Игроки клуба "{currentTeamName}" не найдены</Text>}
+                {teamPlayers.length === 0 && <Text style={styles.emptyText}>Игроки клуба «{currentTeamName}» не найдены</Text>}
                 {teamPlayers.map(player => {
                     const isSelected = !!selectedPlayers[player.id];
                     return (
@@ -358,9 +460,10 @@ function RosterEditScreen({ match, allPlayers, onSave, onBack }) {
 // ==================================================
 // MATCH CONTROL SCREEN (ГОЛЫ + АССИСТЕНТЫ + JAVA ЗВУК)
 // ==================================================
-function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, sessionToken = null }) {
+function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, sessionToken = null, operatorToken = null, onOpenSettings }) {
   const videoRef = useRef(null);
-  const opFetch = (path, options = {}) => operatorFetch(path, sessionToken, accessCode, options);
+  const opAuth = { sessionToken, accessCode, operatorToken };
+  const opFetch = (path, options = {}) => operatorFetch(path, opAuth, options);
   
   // Состояния
   const [isStreaming, setIsStreaming] = useState(false); 
@@ -387,8 +490,8 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   const sportType = match.sport_type || 'football'; 
   const halfDuration = match.half_duration || 45;
   
-  // 🔥 ИСПРАВЛЕНО: Умная проверка разрешения на стриминг (Экономия батареи)
-  const canStream = match.allow_stream === 1 || match.allow_stream === true; 
+  // Стриминг: allow_stream на матче или operator token; настройки платформы — в Settings
+  const canStream = match.allow_stream === 1 || match.allow_stream === true || !!operatorToken;
 
   useEffect(() => {
     const requestPermissions = async () => {
@@ -424,6 +527,8 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
         let cfg: any = {};
         if (tourData.structure_config) {
           cfg = typeof tourData.structure_config === 'string' ? JSON.parse(tourData.structure_config) : tourData.structure_config;
+        } else if (tourData.playoff_config) {
+          cfg = typeof tourData.playoff_config === 'string' ? JSON.parse(tourData.playoff_config) : tourData.playoff_config;
         }
         const matchStage = match.stage || '';
         const matchRound = match.round || '';
@@ -538,8 +643,9 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       
       // 🔥 Авторизация пульта: access_code (PIN-режим)
       if (accessCode) payload.access_code = accessCode;
+      if (operatorToken) payload.operator_token = operatorToken;
 
-      opFetch(`/api/match/${match.id}/update`, { 
+      opFetch(`/api/match/${match.id}/update`, {
           method: 'POST', 
           body: JSON.stringify(payload) 
       }).catch(e => console.log("Sync error", e));
@@ -550,32 +656,49 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
         Alert.alert("Нет доступа", "Нужны права на камеру и микрофон");
         return;
     }
-    if (isLoading) return; 
-    setIsLoading(true); 
+    if (isLoading) return;
+    setIsLoading(true);
 
     if (isStreaming) {
-        try { 
+        try {
             await videoRef.current?.stopStreaming();
-            setIsStreaming(false); 
-            sendUpdate({ status: 'scheduled' }); 
-            Alert.alert("Эфир остановлен"); 
-        } catch (e) { 
-            Alert.alert("Ошибка остановки", e.message); 
+            setIsStreaming(false);
+            sendUpdate({ status: 'scheduled' });
+            Alert.alert("Эфир остановлен");
+        } catch (e: any) {
+            Alert.alert("Ошибка остановки", e.message);
         } finally { setIsLoading(false); }
     } else {
         try {
-            const streamKey = `match_${match.id}`;
-            const rtmpUrl = getRtmpLiveUrl();
-            await videoRef.current?.startStreaming(streamKey, rtmpUrl);
-            setIsStreaming(true); 
-            sendUpdate({ status: 'live' }); 
-            
-            if (AudioHelper) AudioHelper.setMicrophoneMute(isMuted);
+            const settings = await loadStreamSettings();
+            const rtmp = getActiveRtmpConfig(settings);
+            if (!rtmp) {
+                Alert.alert(
+                    "Настройте трансляцию",
+                    "Укажите платформу и RTMP URL + ключ в настройках",
+                    [{ text: "Открыть настройки", onPress: onOpenSettings }, { text: "OK" }]
+                );
+                return;
+            }
+            await videoRef.current?.startStreaming(rtmp.streamKey, rtmp.rtmpUrl);
+            setIsStreaming(true);
+            sendUpdate({ status: 'live' });
 
-        } catch (e) { 
+            if (rtmp.platform === 'vk' && settings.vk.embedUrl?.trim()) {
+                opFetch(`/api/match/${match.id}/stream-config`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        vk_stream_url: settings.vk.embedUrl.trim(),
+                        match_stream_key: settings.vk.streamKey.trim(),
+                    }),
+                }).catch(() => {});
+            }
+
+            if (AudioHelper) AudioHelper.setMicrophoneMute(isMuted);
+        } catch (e: any) {
             console.error(e);
             setIsStreaming(false);
-            Alert.alert("Ошибка запуска", "Не удалось начать стрим.");
+            Alert.alert("Ошибка запуска", "Не удалось начать стрим. Проверьте URL и ключ.");
         } finally { setIsLoading(false); }
     }
   };
@@ -680,11 +803,20 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
           setTimerUpdatedAt(null);
           setIsTimerRunning(false);
           setDisplaySeconds(pausedBase);
-          setPeriod(8);
           opFetch(`/api/match/${match.id}/timer/pause`, { method: 'POST' }).catch(() => {});
-          if (isStreaming) { videoRef.current?.stopStreaming(); setIsStreaming(false); }
-          sendUpdate({ period: 8, status: 'finished' }, 'end_match');
-          Alert.alert("Матч завершен");
+
+          const isDraw = score.home === score.away;
+          const isGroupStage = period <= 3;
+          if (isDraw && isGroupStage && (drawEt || drawPen)) {
+              setPeriod(4);
+              sendUpdate({ period: 4 }, 'end_match');
+              Alert.alert('Ничья!', drawEt ? 'Начинается доп. время' : 'Начинается серия пенальти');
+          } else {
+              setPeriod(8);
+              if (isStreaming) { videoRef.current?.stopStreaming(); setIsStreaming(false); }
+              sendUpdate({ period: 8, status: 'finished' }, 'end_match');
+              Alert.alert("Матч завершен");
+          }
       }
       else if (action === 'start_et1') {
           const direction = sportType === 'futsal' ? 'down' : 'up';
@@ -1016,14 +1148,21 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                 </View>
             )}
 
-            {canStream && period !== 4 && (
+            {period !== 4 && (
                 <View style={{flexDirection: 'row', alignItems: 'center', marginLeft: 10, gap: 10}}>
+                    <TouchableOpacity style={styles.btnMicSettings} onPress={onOpenSettings}>
+                        <Text style={styles.btnMicText}>⚙</Text>
+                    </TouchableOpacity>
+                    {canStream && (
+                    <>
                     <TouchableOpacity style={[styles.btnMic, isMuted && styles.btnMicOff]} onPress={toggleMic}>
                         <Text style={styles.btnMicText}>{isMuted ? "🔇" : "🎙️"}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={[styles.btnStream, isStreaming && styles.btnStreamActive, isLoading && { opacity: 0.5 }]} onPress={handleToggleStream} disabled={isLoading}>
                         {isLoading ? <ActivityIndicator color="white"/> : <Text style={styles.btnStreamText}>{isStreaming ? "СТОП" : "ЭФИР"}</Text>}
                     </TouchableOpacity>
+                    </>
+                    )}
                 </View>
             )}
         </View>
@@ -1078,6 +1217,8 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
 
 const styles = StyleSheet.create({
   exitBtnPos: { position: 'absolute', top: 40, right: 30, backgroundColor: '#333', padding: 10, borderRadius: 8 },
+  settingsBtnPos: { position: 'absolute', top: 40, left: 30, backgroundColor: '#1a4384', padding: 10, borderRadius: 8 },
+  settingsBtnText: { color: 'white', fontWeight: 'bold', fontSize: 12 },
   exitBtnText: { color: 'white', fontWeight: 'bold' },
   centerContainer: { flex: 1, backgroundColor: '#121212', justifyContent: 'center', alignItems: 'center' },
   title: { color: 'white', fontSize: 28, fontWeight: '900', marginBottom: 20, textAlign: 'center' },
@@ -1169,6 +1310,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#ccc',
+  },
+  btnMicSettings: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(26,67,132,0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#4a90e2',
   },
   btnMicOff: {
     backgroundColor: '#e31e24', 

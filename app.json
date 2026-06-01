@@ -1,5 +1,6 @@
 {
   "expo": {
+  "scheme": "waafstreamer",
     "name": "waaf-streamer",
     "slug": "waaf-streamer",
     "version": "1.0.0",
