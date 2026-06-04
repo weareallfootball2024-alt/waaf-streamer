@@ -16,8 +16,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.waaf.waafstreamer",
       "infoPlist": {
-        "NSCameraUsageDescription": "Разрешите доступ к камере для трансляции матчей.",
-        "NSMicrophoneUsageDescription": "Разрешите доступ к микрофону для звука в трансляции."
+        "NSCameraUsageDescription": "Камера нужна для трансляции матчей и записи тестов навыков.",
+        "NSMicrophoneUsageDescription": "Микрофон нужен для звука в трансляции и при записи тестов."
       }
     },
     "android": {
@@ -48,8 +48,8 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Разрешите доступ к камере для трансляции матчей.",
-          "microphonePermission": "Разрешите доступ к микрофону для звука в трансляции.",
+          "cameraPermission": "Камера нужна для трансляции матчей и записи тестов навыков.",
+          "microphonePermission": "Микрофон нужен для звука в трансляции и при записи тестов.",
           "recordAudioAndroid": true
         }
       ],
