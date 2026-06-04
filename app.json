@@ -1,7 +1,7 @@
 {
   "expo": {
   "scheme": "waafstreamer",
-    "name": "waaf-streamer",
+    "name": "WAAF Streamer",
     "slug": "waaf-streamer",
     "version": "1.0.0",
     "orientation": "landscape",
@@ -53,8 +53,7 @@
           "recordAudioAndroid": true
         }
       ],
-      "expo-screen-orientation",
-      "expo-dev-client"
+      "expo-screen-orientation"
     ],
     "extra": {
       "eas": {

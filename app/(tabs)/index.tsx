@@ -81,6 +81,14 @@ function TournamentLoginScreen({ onNext, onOpenSettings, initialToken = '' }) {
         ]);
     };
 
+    const openPrivacy = async () => {
+        try {
+            await Linking.openURL('https://мывсефутбол.рф/privacy');
+        } catch (e) {
+            Alert.alert("Ошибка", "Не удалось открыть политику конфиденциальности");
+        }
+    };
+
     return (
         <View style={styles.centerContainer}>
             <StatusBar hidden />
@@ -89,6 +97,9 @@ function TournamentLoginScreen({ onNext, onOpenSettings, initialToken = '' }) {
             </TouchableOpacity>
             <TouchableOpacity style={styles.exitBtnPos} onPress={handleExit}>
                 <Text style={styles.exitBtnText}>🚪 ВЫХОД</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.privacyBtnPos} onPress={openPrivacy}>
+                <Text style={styles.privacyBtnText}>🔒 ПОЛИТИКА</Text>
             </TouchableOpacity>
 
             <Text style={styles.title}>WAAF STREAMER</Text>
@@ -1218,8 +1229,10 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
 const styles = StyleSheet.create({
   exitBtnPos: { position: 'absolute', top: 40, right: 30, backgroundColor: '#333', padding: 10, borderRadius: 8 },
   settingsBtnPos: { position: 'absolute', top: 40, left: 30, backgroundColor: '#1a4384', padding: 10, borderRadius: 8 },
+  privacyBtnPos: { position: 'absolute', top: 40, right: 150, backgroundColor: '#4b5563', padding: 10, borderRadius: 8 },
   settingsBtnText: { color: 'white', fontWeight: 'bold', fontSize: 12 },
   exitBtnText: { color: 'white', fontWeight: 'bold' },
+  privacyBtnText: { color: 'white', fontWeight: 'bold', fontSize: 12 },
   centerContainer: { flex: 1, backgroundColor: '#121212', justifyContent: 'center', alignItems: 'center' },
   title: { color: 'white', fontSize: 28, fontWeight: '900', marginBottom: 20, textAlign: 'center' },
   subTitle: { color: 'gray', fontSize: 18, marginBottom: 30, textAlign: 'center' },
