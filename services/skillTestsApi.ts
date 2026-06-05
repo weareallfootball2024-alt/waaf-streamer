@@ -31,8 +31,9 @@ export async function fetchTestTypes(): Promise<SkillTestType[]> {
   return res.json();
 }
 
-export async function fetchClubs(): Promise<ClubItem[]> {
-  const res = await authFetch('/api/skill-tests/clubs');
+export async function fetchClubs(options?: { mine?: boolean }): Promise<ClubItem[]> {
+  const qs = options?.mine ? '?mine=1' : '';
+  const res = await authFetch(`/api/skill-tests/clubs${qs}`);
   if (!res.ok) throw new Error('Не удалось загрузить клубы');
   return res.json();
 }

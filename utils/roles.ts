@@ -19,3 +19,7 @@ export function getUserRoles(user: StaffUser | null): string[] {
 export function canAccessTesting(user: StaffUser | null): boolean {
   return getUserRoles(user).some((r) => TESTING_ROLES.has(r));
 }
+
+export function isSuperAdmin(user: StaffUser | null): boolean {
+  return getUserRoles(user).some((r) => r === 'superadmin' || r === 'super_admin');
+}

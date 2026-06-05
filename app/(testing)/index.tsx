@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -30,7 +30,7 @@ import {
   type PlayerItem,
   type SkillTestType,
 } from '../../services/skillTestsApi';
-import { canAccessTesting, type StaffUser } from '../../utils/roles';
+import { canAccessTesting, isSuperAdmin, type StaffUser } from '../../utils/roles';
 
 type Screen =
   | 'login'
@@ -50,6 +50,8 @@ export default function TestingApp() {
   const [loading, setLoading] = useState(false);
 
   const [clubs, setClubs] = useState<ClubItem[]>([]);
+  const [clubSearch, setClubSearch] = useState('');
+  const [myClubsOnly, setMyClubsOnly] = useState(false);
   const [club, setClub] = useState<ClubItem | null>(null);
   const [tests, setTests] = useState<SkillTestType[]>([]);
   const [test, setTest] = useState<SkillTestType | null>(null);
@@ -63,6 +65,18 @@ export default function TestingApp() {
   const cameraRef = useRef<CameraView>(null);
   const [recording, setRecording] = useState(false);
 
+  const superAdmin = isSuperAdmin(user);
+
+  const filteredClubs = useMemo(() => {
+    const q = clubSearch.trim().toLowerCase();
+    if (!q) return clubs;
+    return clubs.filter(
+      (c) =>
+        c.name.toLowerCase().includes(q) ||
+        (c.city && c.city.toLowerCase().includes(q))
+    );
+  }, [clubs, clubSearch]);
+
   useEffect(() => {
     (async () => {
       const u = await restoreSession();
@@ -72,7 +86,7 @@ export default function TestingApp() {
         try {
           const list = await fetchClubs();
           setClubs(list);
-          if (list.length === 1) {
+          if (list.length === 1 && !isSuperAdmin(u)) {
             setClub(list[0]);
             const t = await fetchTestTypes();
             setTests(t);
@@ -108,12 +122,12 @@ export default function TestingApp() {
     await loadClubs();
   };
 
-  const loadClubs = async () => {
+  const loadClubs = async (options?: { mine?: boolean }) => {
     setLoading(true);
     try {
-      const list = await fetchClubs();
+      const list = await fetchClubs(options);
       setClubs(list);
-      if (list.length === 1) {
+      if (list.length === 1 && !superAdmin) {
         setClub(list[0]);
         setScreen('tests');
         await loadTests();
@@ -125,6 +139,13 @@ export default function TestingApp() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const toggleMyClubs = async () => {
+    const next = !myClubsOnly;
+    setMyClubsOnly(next);
+    setClubSearch('');
+    await loadClubs({ mine: next });
   };
 
   const loadTests = async () => {
@@ -258,11 +279,28 @@ export default function TestingApp() {
     return (
       <SafeAreaView style={styles.root}>
         {header('Клуб', () => logout())}
+        {superAdmin && (
+          <View style={styles.clubsToolbar}>
+            <TextInput
+              style={styles.clubSearchInput}
+              placeholder="Поиск клуба…"
+              placeholderTextColor="#666"
+              value={clubSearch}
+              onChangeText={setClubSearch}
+            />
+            <TouchableOpacity style={styles.myClubsRow} onPress={toggleMyClubs} disabled={loading}>
+              <View style={[styles.checkbox, myClubsOnly && styles.checkboxChecked]}>
+                {myClubsOnly ? <Text style={styles.checkboxMark}>✓</Text> : null}
+              </View>
+              <Text style={styles.myClubsLabel}>Мои клубы</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         {loading ? (
           <ActivityIndicator style={{ marginTop: 40 }} color="#4cd964" />
         ) : (
           <FlatList
-            data={clubs}
+            data={filteredClubs}
             keyExtractor={(c) => String(c.id)}
             contentContainerStyle={styles.list}
             renderItem={({ item }) => (
@@ -287,7 +325,7 @@ export default function TestingApp() {
   if (screen === 'tests') {
     return (
       <SafeAreaView style={styles.root}>
-        {header('Тест', () => (clubs.length > 1 ? setScreen('clubs') : logout()))}
+        {header('Тест', () => (clubs.length > 1 || superAdmin ? setScreen('clubs') : logout()))}
         <FlatList
           data={tests}
           keyExtractor={(t) => String(t.id)}
@@ -490,6 +528,31 @@ const styles = StyleSheet.create({
   btnText: { color: '#000', fontWeight: '800', fontSize: 16 },
   btnTextSecondary: { color: '#ccc', fontWeight: '700' },
   list: { padding: 16, paddingBottom: 40 },
+  clubsToolbar: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
+  clubSearchInput: {
+    height: 44,
+    backgroundColor: '#1e1e1e',
+    borderRadius: 10,
+    color: '#fff',
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: '#333',
+    marginBottom: 10,
+  },
+  myClubsRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#4cd964',
+    marginRight: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: { backgroundColor: '#4cd964' },
+  checkboxMark: { color: '#000', fontWeight: '800', fontSize: 14 },
+  myClubsLabel: { color: '#ccc', fontSize: 15 },
   card: {
     backgroundColor: '#1e1e1e',
     padding: 16,
