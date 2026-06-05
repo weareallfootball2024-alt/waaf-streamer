@@ -3,11 +3,12 @@ import * as SecureStore from 'expo-secure-store';
 import * as WebBrowser from 'expo-web-browser';
 
 import { API_URL } from '../constants/api';
+import { generateCodeChallenge, generateRandomString } from '../utils/vkPkce';
 
 WebBrowser.maybeCompleteAuthSession();
 
-const VK_DEVICE_ID_KEY = 'vk_device_id';
 const VK_TOKEN_KEY = 'vk_access_token';
+const VK_AUTH_HOST = 'https://id.vk.ru';
 
 export type VkGroup = {
   id: number;
@@ -15,22 +16,17 @@ export type VkGroup = {
   photo: string | null;
 };
 
-/** Формат redirect URI для VK ID (мобильное OAuth). Должен совпадать с кабинетом VK ID. */
-export function getVkRedirectUri(): string {
+function requireVkAppId(): string {
   const vkAppId = process.env.EXPO_PUBLIC_VK_APP_ID;
   if (!vkAppId) {
     throw new Error('VK не настроен. Задайте EXPO_PUBLIC_VK_APP_ID');
   }
-  return `vk${vkAppId}://vk.ru/blank.html`;
+  return vkAppId;
 }
 
-async function getOrCreateDeviceId(): Promise<string> {
-  let deviceId = await SecureStore.getItemAsync(VK_DEVICE_ID_KEY);
-  if (!deviceId) {
-    deviceId = `waaf_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-    await SecureStore.setItemAsync(VK_DEVICE_ID_KEY, deviceId);
-  }
-  return deviceId;
+/** Формат redirect URI для VK ID (мобильное OAuth). Должен совпадать с кабинетом VK ID. */
+export function getVkRedirectUri(): string {
+  return `vk${requireVkAppId()}://vk.ru/blank.html`;
 }
 
 export async function getStoredVkToken(): Promise<string | null> {
@@ -41,38 +37,84 @@ export async function clearVkToken(): Promise<void> {
   await SecureStore.deleteItemAsync(VK_TOKEN_KEY);
 }
 
-export async function loginWithVk(): Promise<string> {
-  const vkAppId = process.env.EXPO_PUBLIC_VK_APP_ID;
-  if (!vkAppId) {
-    throw new Error('VK не настроен. Задайте EXPO_PUBLIC_VK_APP_ID');
-  }
+function parseAuthResultUrl(url: string) {
+  const parsed = Linking.parse(url);
+  const params = parsed.queryParams || {};
+  const pick = (key: string): string | null => {
+    const v = params[key];
+    if (!v) return null;
+    return Array.isArray(v) ? v[0] : String(v);
+  };
+  return {
+    code: pick('code'),
+    deviceId: pick('device_id'),
+    state: pick('state'),
+    error: pick('error'),
+    errorDescription: pick('error_description'),
+  };
+}
 
-  const deviceId = await getOrCreateDeviceId();
+function authSessionErrorMessage(
+  result: WebBrowser.WebBrowserAuthSessionResult,
+  redirectUri: string
+): string {
+  if (result.type === 'cancel' || result.type === 'dismiss') {
+    return 'VK авторизация отменена';
+  }
+  if (result.type === 'success' && result.url) {
+    const { error, errorDescription } = parseAuthResultUrl(result.url);
+    if (error) {
+      return errorDescription || `VK: ${error}`;
+    }
+  }
+  return `VK не вернул авторизацию. Проверьте redirect URI в кабинете VK ID: ${redirectUri}`;
+}
+
+export async function loginWithVk(): Promise<string> {
+  const vkAppId = requireVkAppId();
   const redirectUri = getVkRedirectUri();
+  const codeVerifier = generateRandomString(64);
+  const codeChallenge = await generateCodeChallenge(codeVerifier);
+  const state = generateRandomString(48);
+
   const authUrl =
-    `https://id.vk.com/authorize?client_id=${encodeURIComponent(vkAppId)}` +
+    `${VK_AUTH_HOST}/authorize?response_type=code` +
+    `&client_id=${encodeURIComponent(vkAppId)}` +
     `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-    `&response_type=code&scope=${encodeURIComponent('groups')}` +
-    `&state=waaf&device_id=${encodeURIComponent(deviceId)}`;
+    `&state=${encodeURIComponent(state)}` +
+    `&code_challenge=${encodeURIComponent(codeChallenge)}` +
+    `&code_challenge_method=S256`;
 
   const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUri);
   if (result.type !== 'success' || !result.url) {
-    throw new Error('VK авторизация отменена');
+    throw new Error(authSessionErrorMessage(result, redirectUri));
   }
 
-  const parsed = Linking.parse(result.url);
-  const code = parsed.queryParams?.code;
-  if (!code || Array.isArray(code)) {
+  const { code, deviceId, state: returnedState, error, errorDescription } =
+    parseAuthResultUrl(result.url);
+
+  if (error) {
+    throw new Error(errorDescription || `VK: ${error}`);
+  }
+  if (!code) {
     throw new Error('VK не вернул код авторизации');
+  }
+  if (!deviceId) {
+    throw new Error('VK не вернул device_id');
+  }
+  if (returnedState !== state) {
+    throw new Error('VK: несовпадение state (возможная подмена ответа)');
   }
 
   const exchangeRes = await fetch(`${API_URL}/api/auth/vk-id/exchange`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      code: String(code),
+      code,
+      code_verifier: codeVerifier,
       redirect_uri: redirectUri,
       device_id: deviceId,
+      state,
     }),
   });
   const data = await exchangeRes.json();

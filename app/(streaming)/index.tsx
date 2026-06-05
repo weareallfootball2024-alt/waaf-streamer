@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 
 import { ApiVideoLiveStreamView } from '@api.video/react-native-livestream';
+import * as ImagePicker from 'expo-image-picker';
 import * as ScreenOrientation from 'expo-screen-orientation';
 
 import { API_URL } from '../../constants/api';
@@ -32,6 +33,12 @@ import {
   getActiveRtmpConfig,
   loadStreamSettings,
 } from '../../services/streamConfig';
+import {
+  buildStandaloneMatch,
+  searchPublicClubs,
+  type PublicClub,
+  type StandaloneMatchContext,
+} from '../../services/standaloneMatch';
 import { formatTimer, getActualSeconds } from '../../utils/matchTimer';
 import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
@@ -41,7 +48,7 @@ const { AudioHelper } = NativeModules;
 // ==================================================
 // ЭКРАН 1: ВВОД ID ТУРНИРА
 // ==================================================
-function TournamentLoginScreen({ onNext, onOpenSettings, initialToken = '', onBackToModules }) {
+function TournamentLoginScreen({ onNext, onOpenSettings, onStandalone, initialToken = '', onBackToModules }) {
     const [tokenInput, setTokenInput] = useState(initialToken);
     const [tournId, setTournId] = useState('');
     const [loading, setLoading] = useState(false);
@@ -122,6 +129,13 @@ function TournamentLoginScreen({ onNext, onOpenSettings, initialToken = '', onBa
                 {loading ? <ActivityIndicator color="white"/> : <Text style={styles.btnText}>ОТКРЫТЬ ТУРНИР</Text>}
             </TouchableOpacity>
 
+            <TouchableOpacity
+                style={[styles.btnPrimary, { backgroundColor: '#2a5a2a', marginTop: 14 }]}
+                onPress={onStandalone}
+            >
+                <Text style={styles.btnText}>МАТЧ ВНЕ ТУРНИРА</Text>
+            </TouchableOpacity>
+
             <TouchableOpacity onPress={() => setShowIdMode(!showIdMode)} style={{ marginTop: 20 }}>
                 <Text style={{ color: '#888', fontSize: 13 }}>{showIdMode ? '▲ Скрыть ID турнира' : '▼ Или ввести ID турнира'}</Text>
             </TouchableOpacity>
@@ -173,6 +187,177 @@ function MatchSelectionScreen({ matches, onSelect, onBack, tokenMode = false }) 
                     </TouchableOpacity>
                 )}
             />
+        </SafeAreaView>
+    );
+}
+
+// ==================================================
+// ЭКРАН: МАТЧ ВНЕ ТУРНИРА — ВЫБОР КЛУБА
+// ==================================================
+function StandaloneClubScreen({ onStart, onBack, onOpenSettings }) {
+    const [search, setSearch] = useState('');
+    const [clubs, setClubs] = useState<PublicClub[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [manualMode, setManualMode] = useState(false);
+    const [manualName, setManualName] = useState('');
+    const [manualLogoUri, setManualLogoUri] = useState<string | null>(null);
+    const [opponent, setOpponent] = useState('Соперник');
+    const [selectedClub, setSelectedClub] = useState<PublicClub | null>(null);
+
+    const runSearch = async () => {
+        if (!search.trim()) return;
+        setLoading(true);
+        try {
+            setClubs(await searchPublicClubs(search));
+            setManualMode(false);
+            setSelectedClub(null);
+        } catch (e) {
+            Alert.alert('Ошибка', e instanceof Error ? e.message : 'Поиск не удался');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const pickLogo = async () => {
+        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) {
+            Alert.alert('Нужен доступ к галерее');
+            return;
+        }
+        const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ['images'],
+            allowsEditing: true,
+            aspect: [1, 1],
+            quality: 0.85,
+        });
+        if (!result.canceled && result.assets[0]?.uri) {
+            setManualLogoUri(result.assets[0].uri);
+        }
+    };
+
+    const startFromClub = (club: PublicClub) => {
+        const ctx: StandaloneMatchContext = {
+            standalone: true,
+            clubId: club.id,
+            clubName: club.name,
+            clubLogoUri: club.logo_url || '',
+            teamHome: club.name,
+            teamAway: opponent.trim() || 'Соперник',
+        };
+        onStart(ctx);
+    };
+
+    const startManual = () => {
+        const name = manualName.trim();
+        if (!name) {
+            Alert.alert('Ошибка', 'Введите название клуба');
+            return;
+        }
+        const ctx: StandaloneMatchContext = {
+            standalone: true,
+            clubName: name,
+            clubLogoUri: manualLogoUri || '',
+            teamHome: name,
+            teamAway: opponent.trim() || 'Соперник',
+        };
+        onStart(ctx);
+    };
+
+    return (
+        <SafeAreaView style={styles.listContainer}>
+            <View style={styles.listHeader}>
+                <TouchableOpacity onPress={onBack} style={styles.backBtnSmall}>
+                    <Text style={{ color: 'white', fontWeight: 'bold' }}>НАЗАД</Text>
+                </TouchableOpacity>
+                <Text style={styles.titleSmall}>ВНЕ ТУРНИРА</Text>
+                <TouchableOpacity onPress={onOpenSettings}>
+                    <Text style={{ color: '#4cd964', fontWeight: 'bold', fontSize: 12 }}>⚙</Text>
+                </TouchableOpacity>
+            </View>
+            <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+                <Text style={styles.subTitle}>Найдите клуб в системе WAAF</Text>
+                <TextInput
+                    style={styles.inputBig}
+                    placeholder="Название клуба"
+                    placeholderTextColor="#666"
+                    value={search}
+                    onChangeText={setSearch}
+                    onSubmitEditing={runSearch}
+                />
+                <TouchableOpacity style={styles.btnPrimary} onPress={runSearch} disabled={loading}>
+                    {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>НАЙТИ</Text>}
+                </TouchableOpacity>
+
+                {clubs.map((club) => (
+                    <TouchableOpacity
+                        key={club.id}
+                        style={[styles.matchCard, selectedClub?.id === club.id && { borderColor: '#4cd964', borderWidth: 2 }]}
+                        onPress={() => setSelectedClub(club)}
+                    >
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            {club.logo_url ? (
+                                <Image source={{ uri: club.logo_url }} style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10 }} />
+                            ) : (
+                                <View style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10, backgroundColor: '#333' }} />
+                            )}
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.teamTitle}>{club.name}</Text>
+                                {club.city ? <Text style={{ color: '#888', fontSize: 12 }}>{club.city}</Text> : null}
+                            </View>
+                        </View>
+                    </TouchableOpacity>
+                ))}
+
+                {selectedClub && (
+                    <>
+                        <Text style={[styles.subTitle, { marginTop: 16 }]}>Соперник (необязательно)</Text>
+                        <TextInput
+                            style={styles.inputBig}
+                            placeholder="Соперник"
+                            placeholderTextColor="#666"
+                            value={opponent}
+                            onChangeText={setOpponent}
+                        />
+                        <TouchableOpacity style={styles.btnPrimary} onPress={() => startFromClub(selectedClub)}>
+                            <Text style={styles.btnText}>К СТРИМУ</Text>
+                        </TouchableOpacity>
+                    </>
+                )}
+
+                <TouchableOpacity onPress={() => setManualMode(!manualMode)} style={{ marginTop: 24 }}>
+                    <Text style={{ color: '#888', textAlign: 'center' }}>
+                        {manualMode ? '▲ Скрыть ручной ввод' : '▼ Моего клуба нет в списке'}
+                    </Text>
+                </TouchableOpacity>
+
+                {manualMode && (
+                    <View style={{ marginTop: 12 }}>
+                        <TextInput
+                            style={styles.inputBig}
+                            placeholder="Название клуба"
+                            placeholderTextColor="#666"
+                            value={manualName}
+                            onChangeText={setManualName}
+                        />
+                        <TextInput
+                            style={styles.inputBig}
+                            placeholder="Соперник"
+                            placeholderTextColor="#666"
+                            value={opponent}
+                            onChangeText={setOpponent}
+                        />
+                        <TouchableOpacity style={[styles.btnPrimary, { backgroundColor: '#444' }]} onPress={pickLogo}>
+                            <Text style={styles.btnText}>{manualLogoUri ? 'СМЕНИТЬ ЛОГО' : 'ДОБАВИТЬ ЛОГО'}</Text>
+                        </TouchableOpacity>
+                        {manualLogoUri ? (
+                            <Image source={{ uri: manualLogoUri }} style={{ width: 72, height: 72, borderRadius: 36, alignSelf: 'center', marginVertical: 12 }} />
+                        ) : null}
+                        <TouchableOpacity style={styles.btnPrimary} onPress={startManual}>
+                            <Text style={styles.btnText}>К СТРИМУ</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
+            </ScrollView>
         </SafeAreaView>
     );
 }
@@ -250,6 +435,7 @@ export default function App() {
   const [operatorToken, setOperatorToken] = useState<string | null>(null);
   const [pendingLinkToken, setPendingLinkToken] = useState('');
   const [settingsReturnScreen, setSettingsReturnScreen] = useState('step1_tourn');
+  const [isStandaloneSession, setIsStandaloneSession] = useState(false);
 
   const openSettings = (returnTo = 'step1_tourn') => {
       setSettingsReturnScreen(returnTo);
@@ -328,6 +514,17 @@ export default function App() {
       setCurrentScreen('step1_tourn');
       setSelectedMatch(null);
       setOperatorToken(null);
+      setIsStandaloneSession(false);
+  };
+
+  const startStandaloneMatch = (ctx: StandaloneMatchContext) => {
+      setSelectedMatch(buildStandaloneMatch(ctx));
+      setMatchRoster([]);
+      setIsStandaloneSession(true);
+      setOperatorToken(null);
+      setMatchAccessCode(null);
+      setMatchSessionToken(null);
+      setCurrentScreen('control');
   };
 
   const handleBackToSchedule = async () => {
@@ -351,9 +548,19 @@ export default function App() {
       return (
           <TournamentLoginScreen
               onNext={goToMatchList}
+              onStandalone={() => setCurrentScreen('step_standalone_club')}
               onOpenSettings={() => openSettings('step1_tourn')}
               initialToken={pendingLinkToken}
               onBackToModules={() => router.replace('/')}
+          />
+      );
+  }
+  if (currentScreen === 'step_standalone_club') {
+      return (
+          <StandaloneClubScreen
+              onStart={startStandaloneMatch}
+              onBack={handleBackToStart}
+              onOpenSettings={() => openSettings('step_standalone_club')}
           />
       );
   }
@@ -387,7 +594,7 @@ export default function App() {
           <MatchControlScreen
               match={selectedMatch}
               matchRoster={matchRoster}
-              onBack={handleBackToSchedule}
+              onBack={isStandaloneSession ? () => setCurrentScreen('step_standalone_club') : handleBackToSchedule}
               accessCode={matchAccessCode}
               sessionToken={matchSessionToken}
               operatorToken={operatorToken}
@@ -478,8 +685,12 @@ function RosterEditScreen({ match, allPlayers, onSave, onBack, accessCode = null
 // ==================================================
 function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, sessionToken = null, operatorToken = null, onOpenSettings }) {
   const videoRef = useRef(null);
+  const isStandalone = !!match.standalone;
   const opAuth = { sessionToken, accessCode, operatorToken };
   const opFetch = (path, options = {}) => operatorFetch(path, opAuth, options);
+  const matchApi = (path: string, options = {}) => {
+    if (!isStandalone && match.id) opFetch(path, options).catch(() => {});
+  };
   
   // Состояния
   const [isStreaming, setIsStreaming] = useState(false); 
@@ -506,8 +717,8 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   const sportType = match.sport_type || 'football'; 
   const halfDuration = match.half_duration || 45;
   
-  // Стриминг: allow_stream на матче или operator token; настройки платформы — в Settings
-  const canStream = match.allow_stream === 1 || match.allow_stream === true || !!operatorToken;
+  // Стриминг: standalone всегда; турнир — allow_stream или operator token
+  const canStream = isStandalone || match.allow_stream === 1 || match.allow_stream === true || !!operatorToken;
 
   useEffect(() => {
     const requestPermissions = async () => {
@@ -535,6 +746,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   const [penScore, setPenScore] = useState({ home: 0, away: 0 });
 
   useEffect(() => {
+    if (isStandalone) return;
     const tid = match.tournament_id;
     if (!tid) return;
     fetch(`${API_URL}/api/tournaments/${tid}`)
@@ -576,10 +788,11 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
         }
       })
       .catch(() => {});
-  }, [match.id, match.tournament_id]);
+  }, [match.id, match.tournament_id, isStandalone]);
 
   // Синхронизация таймера с сервером при входе в экран
   useEffect(() => {
+    if (isStandalone || !match.id) return;
     fetch(`${API_URL}/api/match/${match.id}/timer/sync`)
       .then(r => r.json())
       .then(sync => {
@@ -593,7 +806,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
         }
       })
       .catch(() => {});
-  }, [match.id]);
+  }, [match.id, isStandalone]);
 
   // Локальный визуальный тик — пересчитывает время каждую секунду по серверной формуле
   useEffect(() => {
@@ -631,7 +844,10 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
 
   const sendUpdate = (updates: any = {}, eventType: string | null = null, playerId: any = null, teamId: any = null, isHighlight = false, assistantId: any = null) => {
       if (updates.period !== undefined) setPeriod(updates.period);
-      
+      if (updates.score_home !== undefined) setScore((s) => ({ ...s, home: updates.score_home }));
+      if (updates.score_away !== undefined) setScore((s) => ({ ...s, away: updates.score_away }));
+      if (isStandalone) return;
+
       const currentSec = getCurrentDisplaySeconds();
       const payload: any = {
           score_home: updates.score_home !== undefined ? updates.score_home : score.home,
@@ -661,10 +877,10 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       if (accessCode) payload.access_code = accessCode;
       if (operatorToken) payload.operator_token = operatorToken;
 
-      opFetch(`/api/match/${match.id}/update`, {
+      matchApi(`/api/match/${match.id}/update`, {
           method: 'POST', 
           body: JSON.stringify(payload) 
-      }).catch(e => console.log("Sync error", e));
+      });
   };
 
   const handleToggleStream = async () => {
@@ -700,8 +916,8 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             setIsStreaming(true);
             sendUpdate({ status: 'live' });
 
-            if (rtmp.platform === 'vk' && settings.vk.embedUrl?.trim()) {
-                opFetch(`/api/match/${match.id}/stream-config`, {
+            if (!isStandalone && rtmp.platform === 'vk' && settings.vk.embedUrl?.trim()) {
+                matchApi(`/api/match/${match.id}/stream-config`, {
                     method: 'POST',
                     body: JSON.stringify({
                         vk_stream_url: settings.vk.embedUrl.trim(),
@@ -741,10 +957,10 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
           setPeriod(1);
           setDisplaySeconds(startBase);
           // Отправляем на сервер
-          opFetch(`/api/match/${match.id}/timer/start`, {
+          matchApi(`/api/match/${match.id}/timer/start`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ period: 1, timer_base_seconds: startBase, timer_direction: direction })
-          }).catch(() => {});
+          });
           sendUpdate({ period: 1 }, 'start_match');
       }
       else if (action === 'pause') {
@@ -753,17 +969,17 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
           setTimerUpdatedAt(null);
           setIsTimerRunning(false);
           setDisplaySeconds(pausedBase);
-          opFetch(`/api/match/${match.id}/timer/pause`, { method: 'POST' }).catch(() => {});
+          matchApi(`/api/match/${match.id}/timer/pause`, { method: 'POST' });
           sendUpdate({});
       }
       else if (action === 'resume') {
           const now = Date.now();
           setTimerUpdatedAt(now);
           setIsTimerRunning(true);
-          opFetch(`/api/match/${match.id}/timer/start`, {
+          matchApi(`/api/match/${match.id}/timer/start`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ period, timer_base_seconds: timerBase, timer_direction: timerDirection })
-          }).catch(() => {});
+          });
           sendUpdate({});
       }
       else if (action === 'end_h1') {
@@ -773,7 +989,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
           setIsTimerRunning(false);
           setDisplaySeconds(pausedBase);
           setPeriod(2);
-          opFetch(`/api/match/${match.id}/timer/pause`, { method: 'POST' }).catch(() => {});
+          matchApi(`/api/match/${match.id}/timer/pause`, { method: 'POST' });
           sendUpdate({ period: 2 }, 'end_h1');
       }
       else if (action === 'start_h2') {
@@ -787,10 +1003,10 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
           setTimerDirection(direction);
           setPeriod(3);
           setDisplaySeconds(startBase);
-          opFetch(`/api/match/${match.id}/timer/start`, {
+          matchApi(`/api/match/${match.id}/timer/start`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ period: 3, timer_base_seconds: startBase, timer_direction: direction })
-          }).catch(() => {});
+          });
           sendUpdate({ period: 3 }, 'start_h2');
       }
       else if (action === 'end_h2') {
@@ -799,7 +1015,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
           setTimerUpdatedAt(null);
           setIsTimerRunning(false);
           setDisplaySeconds(pausedBase);
-          opFetch(`/api/match/${match.id}/timer/pause`, { method: 'POST' }).catch(() => {});
+          matchApi(`/api/match/${match.id}/timer/pause`, { method: 'POST' });
           // Проверяем ничью
           const isDraw = score.home === score.away;
           if (isDraw && (drawEt || drawPen)) {
@@ -819,7 +1035,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
           setTimerUpdatedAt(null);
           setIsTimerRunning(false);
           setDisplaySeconds(pausedBase);
-          opFetch(`/api/match/${match.id}/timer/pause`, { method: 'POST' }).catch(() => {});
+          matchApi(`/api/match/${match.id}/timer/pause`, { method: 'POST' });
 
           const isDraw = score.home === score.away;
           const isGroupStage = period <= 3;
@@ -845,10 +1061,10 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
           setTimerDirection(direction);
           setPeriod(5);
           setDisplaySeconds(startBase);
-          opFetch(`/api/match/${match.id}/timer/start`, {
+          matchApi(`/api/match/${match.id}/timer/start`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ period: 5, timer_base_seconds: startBase, timer_direction: direction })
-          }).catch(() => {});
+          });
           sendUpdate({ period: 5 }, 'start_et1');
       }
       else if (action === 'end_et1') {
@@ -858,7 +1074,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
           setIsTimerRunning(false);
           setDisplaySeconds(pausedBase);
           setPeriod(6);
-          opFetch(`/api/match/${match.id}/timer/pause`, { method: 'POST' }).catch(() => {});
+          matchApi(`/api/match/${match.id}/timer/pause`, { method: 'POST' });
           sendUpdate({ period: 6 }, 'end_et1');
           // Автоматически запускаем ДВ2
           setTimeout(() => handleTimerAction('start_et2'), 1500);
@@ -874,10 +1090,10 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
           setTimerDirection(direction);
           setPeriod(6);
           setDisplaySeconds(startBase);
-          opFetch(`/api/match/${match.id}/timer/start`, {
+          matchApi(`/api/match/${match.id}/timer/start`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ period: 6, timer_base_seconds: startBase, timer_direction: direction })
-          }).catch(() => {});
+          });
           sendUpdate({ period: 6 }, 'start_et2');
       }
       else if (action === 'end_et2') {
@@ -886,7 +1102,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
           setTimerUpdatedAt(null);
           setIsTimerRunning(false);
           setDisplaySeconds(pausedBase);
-          opFetch(`/api/match/${match.id}/timer/pause`, { method: 'POST' }).catch(() => {});
+          matchApi(`/api/match/${match.id}/timer/pause`, { method: 'POST' });
           const isDraw = score.home === score.away;
           if (isDraw && drawPen) {
               setPeriod(7);
@@ -910,6 +1126,10 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
 
   // 🔥 ИСПРАВЛЕНО: Рабочая функция отмены
   const handleUndo = () => {
+      if (isStandalone) {
+          Alert.alert('Локальный режим', 'Отмена событий доступна только в турнире на платформе');
+          return;
+      }
       Alert.alert(
           "Отмена действия",
           "Отменить последнее событие (гол или карточку)?",
@@ -1138,7 +1358,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                         setTimerUpdatedAt(null);
                         setIsTimerRunning(false);
                         setPeriod(8);
-                        opFetch(`/api/match/${match.id}/timer/pause`, { method: 'POST' }).catch(() => {});
+                        matchApi(`/api/match/${match.id}/timer/pause`, { method: 'POST' });
                         if (isStreaming) { videoRef.current?.stopStreaming(); setIsStreaming(false); }
                         sendUpdate({
                             period: 8,
