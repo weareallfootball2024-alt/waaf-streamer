@@ -1,7 +1,6 @@
 import * as Linking from 'expo-linking';
 import * as SecureStore from 'expo-secure-store';
 import * as WebBrowser from 'expo-web-browser';
-import { makeRedirectUri } from 'expo-auth-session';
 
 import { API_URL } from '../constants/api';
 
@@ -16,8 +15,13 @@ export type VkGroup = {
   photo: string | null;
 };
 
+/** Формат redirect URI для VK ID (мобильное OAuth). Должен совпадать с кабинетом VK ID. */
 export function getVkRedirectUri(): string {
-  return makeRedirectUri({ scheme: 'waafstreamer', path: 'oauth/vk' });
+  const vkAppId = process.env.EXPO_PUBLIC_VK_APP_ID;
+  if (!vkAppId) {
+    throw new Error('VK не настроен. Задайте EXPO_PUBLIC_VK_APP_ID');
+  }
+  return `vk${vkAppId}://vk.ru/blank.html`;
 }
 
 async function getOrCreateDeviceId(): Promise<string> {
