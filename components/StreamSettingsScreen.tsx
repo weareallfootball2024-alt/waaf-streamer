@@ -27,6 +27,7 @@ import {
   fetchGroupAlbums,
   getStoredVkToken,
   loginWithVk,
+  resolveCommunity,
   VkAlbum,
   VkGroup,
 } from '../services/vkAuth';
@@ -47,6 +48,8 @@ export function StreamSettingsScreen({ onClose }: Props) {
   const [playlistRtmpUrl, setPlaylistRtmpUrl] = useState('');
   const [playlistStreamKey, setPlaylistStreamKey] = useState('');
   const [groupsError, setGroupsError] = useState<string | null>(null);
+  const [communityInput, setCommunityInput] = useState('');
+  const [resolveLoading, setResolveLoading] = useState(false);
 
   const loadAlbums = async (groupId: number) => {
     setAlbumsLoading(true);
@@ -71,10 +74,17 @@ export function StreamSettingsScreen({ onClose }: Props) {
           const list = await fetchAdminGroups(token);
           setGroups(list);
           if (list.length === 0) {
-            setGroupsError('Нет сообществ или нужен scope groups в кабинете WAAF stream');
+            setGroupsError(
+              'Список пуст. Укажите сообщество вручную ниже или дождитесь одобрения scope groups от VK.',
+            );
           }
         } catch (e: unknown) {
-          setGroupsError(e instanceof Error ? e.message : 'Ошибка загрузки сообществ');
+          const msg = e instanceof Error ? e.message : 'Ошибка загрузки сообществ';
+          setGroupsError(
+            msg.includes('groups') || /profile type/i.test(msg)
+              ? `${msg} Укажите сообщество вручную ниже.`
+              : msg,
+          );
         }
         if (saved.vk.communityId && saved.vk.streamTarget === 'playlist') {
           await loadAlbums(saved.vk.communityId);
@@ -110,10 +120,22 @@ export function StreamSettingsScreen({ onClose }: Props) {
     try {
       const token = await loginWithVk();
       setVkLoggedIn(true);
-      const list = await fetchAdminGroups(token);
-      setGroups(list);
-      if (list.length === 0) {
-        setGroupsError('Нет сообществ. Включите groups в id.vk.com → WAAF stream → Доступы и войдите снова.');
+      try {
+        const list = await fetchAdminGroups(token);
+        setGroups(list);
+        if (list.length === 0) {
+          setGroupsError(
+            'Список пуст. Укажите сообщество вручную ниже или дождитесь одобрения scope groups от VK.',
+          );
+        }
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : 'Ошибка загрузки сообществ';
+        setGroups([]);
+        setGroupsError(
+          msg.includes('groups') || /profile type/i.test(msg)
+            ? `${msg} Укажите сообщество вручную ниже.`
+            : msg,
+        );
       }
     } catch (e: unknown) {
       Alert.alert('VK', e instanceof Error ? e.message : 'Ошибка входа');
@@ -147,6 +169,25 @@ export function StreamSettingsScreen({ onClose }: Props) {
     });
     if (settings.vk.streamTarget === 'playlist') {
       loadAlbums(group.id);
+    }
+  };
+
+  const handleApplyCommunity = async () => {
+    const trimmed = communityInput.trim();
+    if (!trimmed) {
+      Alert.alert('Сообщество', 'Введите ссылку или ID сообщества');
+      return;
+    }
+    setResolveLoading(true);
+    try {
+      const group = await resolveCommunity(trimmed);
+      selectCommunity(group);
+      setCommunityInput('');
+      setGroupsError(null);
+    } catch (e: unknown) {
+      Alert.alert('Сообщество', e instanceof Error ? e.message : 'Не удалось найти сообщество');
+    } finally {
+      setResolveLoading(false);
     }
   };
 
@@ -256,6 +297,39 @@ export function StreamSettingsScreen({ onClose }: Props) {
                     </TouchableOpacity>
                   );
                 })}
+                <Text style={[styles.hint, { marginTop: 12 }]}>
+                  Или укажите сообщество вручную (club123, public123 или ссылка vk.com/club…):
+                </Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Ссылка или ID сообщества"
+                  placeholderTextColor="#666"
+                  value={communityInput}
+                  onChangeText={setCommunityInput}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TouchableOpacity
+                  style={styles.btnApply}
+                  onPress={handleApplyCommunity}
+                  disabled={resolveLoading}
+                >
+                  {resolveLoading ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.btnApplyText}>ПРИМЕНИТЬ</Text>
+                  )}
+                </TouchableOpacity>
+                {hasCommunity && vk.communityName && (
+                  <View style={[styles.groupRow, styles.groupRowSelected, { marginTop: 8 }]}>
+                    {vk.communityPhoto ? (
+                      <Image source={{ uri: vk.communityPhoto }} style={styles.groupPhoto} />
+                    ) : (
+                      <View style={styles.groupPhotoPlaceholder} />
+                    )}
+                    <Text style={styles.groupName}>{vk.communityName}</Text>
+                  </View>
+                )}
               </>
             )}
 

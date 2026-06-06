@@ -109,3 +109,16 @@ export async function fetchGroupAlbums(groupId: number, accessToken?: string): P
   if (!res.ok) throw new Error(data.error || 'Не удалось загрузить плейлисты');
   return data.albums || [];
 }
+
+export async function resolveCommunity(input: string, accessToken?: string): Promise<VkGroup> {
+  const token = accessToken || (await getStoredVkToken());
+  const headers: Record<string, string> = {};
+  if (token) headers['X-VK-Access-Token'] = token;
+
+  const qs = new URLSearchParams({ input: input.trim() });
+  const res = await fetch(`${API_URL}/api/vk/groups/resolve?${qs.toString()}`, { headers });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Не удалось найти сообщество');
+  if (!data.group) throw new Error('Сообщество не найдено');
+  return data.group;
+}
