@@ -31,6 +31,7 @@ import {
 } from '../../services/operatorFetch';
 import {
   getActiveRtmpConfig,
+  getStreamSetupHint,
   loadStreamSettings,
 } from '../../services/streamConfig';
 import {
@@ -907,7 +908,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             if (!rtmp) {
                 Alert.alert(
                     "Настройте трансляцию",
-                    "Укажите платформу и RTMP URL + ключ в настройках",
+                    getStreamSetupHint(settings),
                     [{ text: "Открыть настройки", onPress: onOpenSettings }, { text: "OK" }]
                 );
                 return;

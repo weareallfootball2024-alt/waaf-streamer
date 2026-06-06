@@ -12,6 +12,7 @@ export default function RootLayout() {
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
+        <Stack.Screen name="oauth" options={{ headerShown: false }} />
         <Stack.Screen name="(streaming)" />
         <Stack.Screen name="(testing)" />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />

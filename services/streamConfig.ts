@@ -4,9 +4,19 @@ import {
   DEFAULT_STREAM_SETTINGS,
   StreamPlatform,
   StreamSettings,
+  VkPlatformConfig,
 } from '../constants/streamPlatforms';
+import { getPlaylistSessionRtmp } from './vkPlaylistSession';
 
 const SETTINGS_KEY = 'waaf_stream_settings';
+
+function normalizeVkConfig(vk: Partial<VkPlatformConfig> | undefined): VkPlatformConfig {
+  const base = { ...DEFAULT_STREAM_SETTINGS.vk, ...vk };
+  if (!base.streamTarget) {
+    base.streamTarget = 'wall';
+  }
+  return base;
+}
 
 export async function loadStreamSettings(): Promise<StreamSettings> {
   try {
@@ -16,7 +26,7 @@ export async function loadStreamSettings(): Promise<StreamSettings> {
     return {
       ...DEFAULT_STREAM_SETTINGS,
       ...parsed,
-      vk: { ...DEFAULT_STREAM_SETTINGS.vk, ...parsed.vk },
+      vk: normalizeVkConfig(parsed.vk),
       youtube: { ...DEFAULT_STREAM_SETTINGS.youtube, ...parsed.youtube },
       rutube: { ...DEFAULT_STREAM_SETTINGS.rutube, ...parsed.rutube },
       waaf: { ...DEFAULT_STREAM_SETTINGS.waaf, ...parsed.waaf },
@@ -27,7 +37,15 @@ export async function loadStreamSettings(): Promise<StreamSettings> {
 }
 
 export async function saveStreamSettings(settings: StreamSettings): Promise<void> {
-  await SecureStore.setItemAsync(SETTINGS_KEY, JSON.stringify(settings));
+  const toSave = { ...settings };
+  if (toSave.vk.streamTarget === 'playlist') {
+    toSave.vk = {
+      ...toSave.vk,
+      rtmpUrl: '',
+      streamKey: '',
+    };
+  }
+  await SecureStore.setItemAsync(SETTINGS_KEY, JSON.stringify(toSave));
 }
 
 export function getActiveRtmpConfig(
@@ -35,13 +53,46 @@ export function getActiveRtmpConfig(
 ): { rtmpUrl: string; streamKey: string; platform: StreamPlatform } | null {
   const platform = settings.activePlatform;
   const cfg = settings[platform];
-  if (!cfg?.enabled || !cfg.rtmpUrl?.trim() || !cfg.streamKey?.trim()) return null;
+  if (!cfg?.enabled) return null;
+
+  if (platform === 'vk') {
+    if (!settings.vk.communityId) return null;
+
+    if (settings.vk.streamTarget === 'playlist') {
+      const session = getPlaylistSessionRtmp();
+      if (!session) return null;
+      return { ...session, platform };
+    }
+
+    if (!cfg.rtmpUrl?.trim() || !cfg.streamKey?.trim()) return null;
+    const url = cfg.rtmpUrl.trim();
+    return {
+      rtmpUrl: url.endsWith('/') ? url : `${url}/`,
+      streamKey: cfg.streamKey.trim(),
+      platform,
+    };
+  }
+
+  if (!cfg.rtmpUrl?.trim() || !cfg.streamKey?.trim()) return null;
   const url = cfg.rtmpUrl.trim();
   return {
     rtmpUrl: url.endsWith('/') ? url : `${url}/`,
     streamKey: cfg.streamKey.trim(),
     platform,
   };
+}
+
+export function getStreamSetupHint(settings: StreamSettings): string {
+  if (settings.activePlatform !== 'vk') {
+    return 'Укажите платформу и RTMP URL + ключ в настройках';
+  }
+  if (!settings.vk.communityId) {
+    return 'Войдите через VK и выберите сообщество в настройках трансляции';
+  }
+  if (settings.vk.streamTarget === 'playlist') {
+    return 'Вставьте RTMP URL и ключ из VK Studio для этой трансляции (режим плейлист) и нажмите «Применить для эфира»';
+  }
+  return 'Скопируйте постоянный RTMP URL и ключ из VK Studio → Ключи и виджеты (режим стена)';
 }
 
 export function isStreamConfigured(settings: StreamSettings): boolean {

@@ -1,3 +1,5 @@
+export type VkStreamTarget = 'wall' | 'playlist';
+
 export type StreamPlatform = 'vk' | 'youtube' | 'rutube' | 'waaf';
 
 export type PlatformConfig = {
@@ -8,9 +10,12 @@ export type PlatformConfig = {
 };
 
 export type VkPlatformConfig = PlatformConfig & {
+  streamTarget: VkStreamTarget;
   communityId?: number;
   communityName?: string;
   communityPhoto?: string;
+  albumId?: number;
+  albumTitle?: string;
 };
 
 export type StreamSettings = {
@@ -39,7 +44,12 @@ const emptyPlatform = (enabled: boolean): PlatformConfig => ({
 
 export const DEFAULT_STREAM_SETTINGS: StreamSettings = {
   activePlatform: 'vk',
-  vk: { ...emptyPlatform(true), communityId: undefined, communityName: undefined },
+  vk: {
+    ...emptyPlatform(true),
+    streamTarget: 'wall',
+    communityId: undefined,
+    communityName: undefined,
+  },
   youtube: emptyPlatform(false),
   rutube: emptyPlatform(false),
   waaf: emptyPlatform(false),

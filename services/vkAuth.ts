@@ -15,6 +15,11 @@ export type VkGroup = {
   photo: string | null;
 };
 
+export type VkAlbum = {
+  id: number;
+  title: string;
+};
+
 export async function getStoredVkToken(): Promise<string | null> {
   return SecureStore.getItemAsync(VK_TOKEN_KEY);
 }
@@ -91,4 +96,16 @@ export async function fetchAdminGroups(accessToken?: string): Promise<VkGroup[]>
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Не удалось загрузить сообщества');
   return data.groups || [];
+}
+
+export async function fetchGroupAlbums(groupId: number, accessToken?: string): Promise<VkAlbum[]> {
+  const token = accessToken || (await getStoredVkToken());
+  if (!token) throw new Error('Сначала войдите через VK');
+
+  const res = await fetch(`${API_URL}/api/vk/groups/${groupId}/albums`, {
+    headers: { 'X-VK-Access-Token': token },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Не удалось загрузить плейлисты');
+  return data.albums || [];
 }

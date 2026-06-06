@@ -17,13 +17,17 @@ import {
   STUB_PLATFORMS,
   StreamPlatform,
   StreamSettings,
+  VkStreamTarget,
 } from '../constants/streamPlatforms';
 import { loadStreamSettings, saveStreamSettings } from '../services/streamConfig';
+import { setPlaylistSessionRtmp } from '../services/vkPlaylistSession';
 import {
   clearVkToken,
   fetchAdminGroups,
+  fetchGroupAlbums,
   getStoredVkToken,
   loginWithVk,
+  VkAlbum,
   VkGroup,
 } from '../services/vkAuth';
 
@@ -37,7 +41,24 @@ export function StreamSettingsScreen({ onClose }: Props) {
   const [saving, setSaving] = useState(false);
   const [vkLoading, setVkLoading] = useState(false);
   const [groups, setGroups] = useState<VkGroup[]>([]);
+  const [albums, setAlbums] = useState<VkAlbum[]>([]);
+  const [albumsLoading, setAlbumsLoading] = useState(false);
   const [vkLoggedIn, setVkLoggedIn] = useState(false);
+  const [playlistRtmpUrl, setPlaylistRtmpUrl] = useState('');
+  const [playlistStreamKey, setPlaylistStreamKey] = useState('');
+  const [groupsError, setGroupsError] = useState<string | null>(null);
+
+  const loadAlbums = async (groupId: number) => {
+    setAlbumsLoading(true);
+    setAlbums([]);
+    try {
+      setAlbums(await fetchGroupAlbums(groupId));
+    } catch {
+      /* плейлисты опциональны — video scope может быть недоступен */
+    } finally {
+      setAlbumsLoading(false);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -47,9 +68,16 @@ export function StreamSettingsScreen({ onClose }: Props) {
       setVkLoggedIn(!!token);
       if (token) {
         try {
-          setGroups(await fetchAdminGroups(token));
-        } catch {
-          /* ignore */
+          const list = await fetchAdminGroups(token);
+          setGroups(list);
+          if (list.length === 0) {
+            setGroupsError('Нет сообществ или нужен scope groups в кабинете WAAF stream');
+          }
+        } catch (e: unknown) {
+          setGroupsError(e instanceof Error ? e.message : 'Ошибка загрузки сообществ');
+        }
+        if (saved.vk.communityId && saved.vk.streamTarget === 'playlist') {
+          await loadAlbums(saved.vk.communityId);
         }
       }
       setLoading(false);
@@ -78,10 +106,15 @@ export function StreamSettingsScreen({ onClose }: Props) {
 
   const handleVkLogin = async () => {
     setVkLoading(true);
+    setGroupsError(null);
     try {
       const token = await loginWithVk();
       setVkLoggedIn(true);
-      setGroups(await fetchAdminGroups(token));
+      const list = await fetchAdminGroups(token);
+      setGroups(list);
+      if (list.length === 0) {
+        setGroupsError('Нет сообществ. Включите groups в id.vk.com → WAAF stream → Доступы и войдите снова.');
+      }
     } catch (e: unknown) {
       Alert.alert('VK', e instanceof Error ? e.message : 'Ошибка входа');
     } finally {
@@ -93,7 +126,15 @@ export function StreamSettingsScreen({ onClose }: Props) {
     await clearVkToken();
     setVkLoggedIn(false);
     setGroups([]);
-    updatePlatform('vk', { communityId: undefined, communityName: undefined, communityPhoto: undefined });
+    setAlbums([]);
+    setGroupsError(null);
+    updatePlatform('vk', {
+      communityId: undefined,
+      communityName: undefined,
+      communityPhoto: undefined,
+      albumId: undefined,
+      albumTitle: undefined,
+    });
   };
 
   const selectCommunity = (group: VkGroup) => {
@@ -101,7 +142,28 @@ export function StreamSettingsScreen({ onClose }: Props) {
       communityId: group.id,
       communityName: group.name,
       communityPhoto: group.photo || undefined,
+      albumId: undefined,
+      albumTitle: undefined,
     });
+    if (settings.vk.streamTarget === 'playlist') {
+      loadAlbums(group.id);
+    }
+  };
+
+  const setStreamTarget = (target: VkStreamTarget) => {
+    updatePlatform('vk', { streamTarget: target, albumId: undefined, albumTitle: undefined });
+    if (target === 'playlist' && settings.vk.communityId) {
+      loadAlbums(settings.vk.communityId);
+    }
+  };
+
+  const applyPlaylistRtmp = () => {
+    if (!playlistRtmpUrl.trim() || !playlistStreamKey.trim()) {
+      Alert.alert('RTMP', 'Укажите URL и ключ трансляции');
+      return;
+    }
+    setPlaylistSessionRtmp(playlistRtmpUrl, playlistStreamKey);
+    Alert.alert('Готово', 'RTMP применён для текущего эфира');
   };
 
   if (loading) {
@@ -113,6 +175,8 @@ export function StreamSettingsScreen({ onClose }: Props) {
   }
 
   const activeCfg = settings[settings.activePlatform];
+  const vk = settings.vk;
+  const hasCommunity = !!vk.communityId;
 
   return (
     <View style={styles.root}>
@@ -171,11 +235,12 @@ export function StreamSettingsScreen({ onClose }: Props) {
                     <Text style={styles.linkOut}>Выйти</Text>
                   </TouchableOpacity>
                 </View>
-                {groups.length === 0 && (
+                {groupsError && <Text style={styles.errorText}>{groupsError}</Text>}
+                {groups.length === 0 && !groupsError && (
                   <Text style={styles.empty}>Нет сообществ с правами администратора</Text>
                 )}
                 {groups.map((g) => {
-                  const selected = settings.vk.communityId === g.id;
+                  const selected = vk.communityId === g.id;
                   return (
                     <TouchableOpacity
                       key={g.id}
@@ -194,33 +259,100 @@ export function StreamSettingsScreen({ onClose }: Props) {
               </>
             )}
 
-            <Text style={[styles.blockTitle, { marginTop: 16 }]}>RTMP (из VK Studio → Ключи)</Text>
-            <Text style={styles.hint}>URL сервера и ключ трансляции из раздела «Ключи и виджеты»</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="RTMP URL сервера"
-              placeholderTextColor="#666"
-              value={settings.vk.rtmpUrl}
-              onChangeText={(t) => updatePlatform('vk', { rtmpUrl: t })}
-              autoCapitalize="none"
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Ключ трансляции (stream key)"
-              placeholderTextColor="#666"
-              value={settings.vk.streamKey}
-              onChangeText={(t) => updatePlatform('vk', { streamKey: t })}
-              autoCapitalize="none"
-              secureTextEntry
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Embed-URL для miniapp (необязательно)"
-              placeholderTextColor="#666"
-              value={settings.vk.embedUrl || ''}
-              onChangeText={(t) => updatePlatform('vk', { embedUrl: t })}
-              autoCapitalize="none"
-            />
+            {hasCommunity && (
+              <>
+                <Text style={[styles.blockTitle, { marginTop: 16 }]}>Куда в сообществе</Text>
+                <View style={styles.platformRow}>
+                  <TouchableOpacity
+                    style={[styles.platformChip, vk.streamTarget === 'wall' && styles.platformChipActive]}
+                    onPress={() => setStreamTarget('wall')}
+                  >
+                    <Text style={[styles.platformChipText, vk.streamTarget === 'wall' && styles.platformChipTextActive]}>
+                      На стену
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.platformChip, vk.streamTarget === 'playlist' && styles.platformChipActive]}
+                    onPress={() => setStreamTarget('playlist')}
+                  >
+                    <Text style={[styles.platformChipText, vk.streamTarget === 'playlist' && styles.platformChipTextActive]}>
+                      Плейлист / трансляция
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {vk.streamTarget === 'wall' && (
+                  <>
+                    <Text style={styles.hint}>
+                      VK Studio → Ключи и виджеты. Постоянный ключ — сохраняется один раз.
+                    </Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="RTMP URL сервера"
+                      placeholderTextColor="#666"
+                      value={vk.rtmpUrl}
+                      onChangeText={(t) => updatePlatform('vk', { rtmpUrl: t })}
+                      autoCapitalize="none"
+                    />
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Ключ трансляции (stream key)"
+                      placeholderTextColor="#666"
+                      value={vk.streamKey}
+                      onChangeText={(t) => updatePlatform('vk', { streamKey: t })}
+                      autoCapitalize="none"
+                      secureTextEntry
+                    />
+                  </>
+                )}
+
+                {vk.streamTarget === 'playlist' && (
+                  <>
+                    <Text style={styles.hint}>
+                      Создайте или выберите трансляцию в VK Studio, скопируйте её RTMP — ключ новый для каждого эфира.
+                    </Text>
+                    {albumsLoading && <ActivityIndicator color="#888" style={{ marginBottom: 8 }} />}
+                    {albums.length > 0 && (
+                      <>
+                        <Text style={styles.hint}>Плейлисты видео (справочно):</Text>
+                        {albums.map((a) => {
+                          const selected = vk.albumId === a.id;
+                          return (
+                            <TouchableOpacity
+                              key={a.id}
+                              style={[styles.groupRow, selected && styles.groupRowSelected]}
+                              onPress={() => updatePlatform('vk', { albumId: a.id, albumTitle: a.title })}
+                            >
+                              <Text style={styles.groupName}>{a.title}</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </>
+                    )}
+                    <TextInput
+                      style={styles.input}
+                      placeholder="RTMP URL для этой трансляции"
+                      placeholderTextColor="#666"
+                      value={playlistRtmpUrl}
+                      onChangeText={setPlaylistRtmpUrl}
+                      autoCapitalize="none"
+                    />
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Ключ этой трансляции"
+                      placeholderTextColor="#666"
+                      value={playlistStreamKey}
+                      onChangeText={setPlaylistStreamKey}
+                      autoCapitalize="none"
+                      secureTextEntry
+                    />
+                    <TouchableOpacity style={styles.btnApply} onPress={applyPlaylistRtmp}>
+                      <Text style={styles.btnApplyText}>ПРИМЕНИТЬ ДЛЯ ЭФИРА</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </>
+            )}
           </View>
         )}
 
@@ -266,7 +398,7 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   scrollContent: { padding: 16, paddingBottom: 40 },
   sectionTitle: { color: '#aaa', fontSize: 13, marginBottom: 10, fontWeight: '600' },
-  platformRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
+  platformRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
   platformChip: {
     paddingHorizontal: 14,
     paddingVertical: 8,
@@ -282,6 +414,7 @@ const styles = StyleSheet.create({
   block: { backgroundColor: '#1a1a1a', borderRadius: 12, padding: 14, marginBottom: 12 },
   blockTitle: { color: '#fff', fontWeight: 'bold', fontSize: 15, marginBottom: 8 },
   hint: { color: '#888', fontSize: 12, marginBottom: 10 },
+  errorText: { color: '#ff6b6b', fontSize: 12, marginBottom: 8 },
   input: {
     backgroundColor: '#2a2a2a',
     color: '#fff',
@@ -299,6 +432,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   btnVkText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
+  btnApply: {
+    backgroundColor: '#2d6a2d',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  btnApplyText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
   vkRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   linkOut: { color: '#e31e24', fontSize: 13 },
   empty: { color: '#666', fontStyle: 'italic', marginBottom: 8 },
