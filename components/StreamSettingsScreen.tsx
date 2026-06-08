@@ -36,6 +36,11 @@ type Props = {
   onClose: () => void;
 };
 
+function formatGroupsError(msg: string): string {
+  if (!msg.includes('groups') && !/profile type/i.test(msg)) return msg;
+  return msg.includes('вручную') ? msg : `${msg} Укажите сообщество вручную ниже.`;
+}
+
 export function StreamSettingsScreen({ onClose }: Props) {
   const [settings, setSettings] = useState<StreamSettings>({ ...DEFAULT_STREAM_SETTINGS });
   const [loading, setLoading] = useState(true);
@@ -80,11 +85,7 @@ export function StreamSettingsScreen({ onClose }: Props) {
           }
         } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : 'Ошибка загрузки сообществ';
-          setGroupsError(
-            msg.includes('groups') || /profile type/i.test(msg)
-              ? `${msg} Укажите сообщество вручную ниже.`
-              : msg,
-          );
+          setGroupsError(formatGroupsError(msg));
         }
         if (saved.vk.communityId && saved.vk.streamTarget === 'playlist') {
           await loadAlbums(saved.vk.communityId);
@@ -131,11 +132,7 @@ export function StreamSettingsScreen({ onClose }: Props) {
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Ошибка загрузки сообществ';
         setGroups([]);
-        setGroupsError(
-          msg.includes('groups') || /profile type/i.test(msg)
-            ? `${msg} Укажите сообщество вручную ниже.`
-            : msg,
-        );
+        setGroupsError(formatGroupsError(msg));
       }
     } catch (e: unknown) {
       Alert.alert('VK', e instanceof Error ? e.message : 'Ошибка входа');
@@ -298,7 +295,7 @@ export function StreamSettingsScreen({ onClose }: Props) {
                   );
                 })}
                 <Text style={[styles.hint, { marginTop: 12 }]}>
-                  Или укажите сообщество вручную (club123, public123 или ссылка vk.com/club…):
+                  Или укажите сообщество вручную (club123, waafootball или ссылка vk.com/waafootball):
                 </Text>
                 <TextInput
                   style={styles.input}
