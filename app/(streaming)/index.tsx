@@ -11,6 +11,7 @@ import {
     SafeAreaView,
     ScrollView,
     StatusBar,
+    Share,
     StyleSheet, Text,
     TextInput,
     TouchableOpacity,
@@ -22,7 +23,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ScreenOrientation from 'expo-screen-orientation';
 
 import { API_URL } from '../../constants/api';
-import { parseOperatorToken } from '../../constants/streamPlatforms';
+import { parseOperatorToken, StreamSettings } from '../../constants/streamPlatforms';
 import { StreamSettingsScreen } from '../../components/StreamSettingsScreen';
 import {
   fetchTournamentMatches,
@@ -849,6 +850,46 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     return getActualSeconds(timerBase, timerUpdatedAt, isTimerRunning, timerDirection);
   };
 
+  const getWaafStreamUrl = () => (match.id ? `${API_URL}/stream/${match.id}` : '');
+
+  const saveVkStreamConfig = async (settings: StreamSettings): Promise<boolean> => {
+    if (!match.id) return true;
+    let vkRtmpUrl = settings.vk.rtmpUrl?.trim() || '';
+    let vkStreamKey = settings.vk.streamKey?.trim() || '';
+    if (settings.vk.streamTarget === 'playlist') {
+      const session = getPlaylistSessionRtmp();
+      if (session) {
+        vkRtmpUrl = session.rtmpUrl.replace(/\/+$/, '');
+        vkStreamKey = session.streamKey;
+      }
+    }
+    const needsVkKeys = settings.activePlatform === 'vk' && settings.vk.vkRelayThroughWaaf;
+    if (needsVkKeys && (!vkRtmpUrl || !vkStreamKey)) {
+      Alert.alert('VK', 'Укажите RTMP URL и ключ VK в настройках трансляции');
+      return false;
+    }
+    try {
+      const res = await opFetch(`/api/match/${match.id}/stream-config`, {
+        method: 'POST',
+        body: JSON.stringify({
+          vk_stream_url: settings.vk.embedUrl?.trim() || null,
+          vk_rtmp_url: vkRtmpUrl || null,
+          vk_stream_key: vkStreamKey || null,
+          match_stream_key: vkStreamKey || null,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        Alert.alert('Ошибка', data.error || 'Не удалось сохранить настройки VK');
+        return false;
+      }
+      return true;
+    } catch {
+      Alert.alert('Ошибка', 'Не удалось сохранить настройки VK');
+      return false;
+    }
+  };
+
   const sendUpdate = (updates: any = {}, eventType: string | null = null, playerId: any = null, teamId: any = null, isHighlight = false, assistantId: any = null) => {
       if (updates.period !== undefined) setPeriod(updates.period);
       if (updates.score_home !== undefined) setScore((s) => ({ ...s, home: updates.score_home }));
@@ -907,6 +948,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             Alert.alert("Ошибка остановки", e.message);
         } finally { setIsLoading(false); }
     } else {
+        let waitingConnection = false;
         try {
             const settings = await loadStreamSettings();
             const rtmp = getActiveRtmpConfig(settings, match.id);
@@ -918,31 +960,17 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                 );
                 return;
             }
-            await videoRef.current?.startStreaming(rtmp.streamKey, rtmp.rtmpUrl);
-            setIsStreaming(true);
-            sendUpdate({ status: 'live' });
 
-            if (rtmp.platform === 'vk' && match.id) {
-                let vkRtmpUrl = settings.vk.rtmpUrl?.trim() || '';
-                let vkStreamKey = settings.vk.streamKey?.trim() || '';
-                if (settings.vk.streamTarget === 'playlist') {
-                    const session = getPlaylistSessionRtmp();
-                    if (session) {
-                        vkRtmpUrl = session.rtmpUrl.replace(/\/+$/, '');
-                        vkStreamKey = session.streamKey;
-                    }
-                }
-                if (vkRtmpUrl && vkStreamKey) {
-                    matchApi(`/api/match/${match.id}/stream-config`, {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            vk_stream_url: settings.vk.embedUrl?.trim() || null,
-                            vk_rtmp_url: vkRtmpUrl,
-                            vk_stream_key: vkStreamKey,
-                            match_stream_key: vkStreamKey,
-                        }),
-                    }).catch(() => {});
-                }
+            if (rtmp.relayToVk || (settings.activePlatform === 'vk' && settings.vk.vkRelayThroughWaaf)) {
+                const saved = await saveVkStreamConfig(settings);
+                if (!saved) return;
+            }
+
+            await videoRef.current?.startStreaming(rtmp.streamKey, rtmp.rtmpUrl);
+            waitingConnection = true;
+
+            if (rtmp.platform === 'vk' && match.id && !settings.vk.vkRelayThroughWaaf) {
+                saveVkStreamConfig(settings).catch(() => {});
             }
 
             if (AudioHelper) AudioHelper.setMicrophoneMute(isMuted);
@@ -950,8 +978,21 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             console.error(e);
             setIsStreaming(false);
             Alert.alert("Ошибка запуска", "Не удалось начать стрим. Проверьте URL и ключ.");
-        } finally { setIsLoading(false); }
+        } finally {
+            if (!waitingConnection) setIsLoading(false);
+        }
     }
+  };
+
+  const handleStreamConnected = () => {
+    setIsLoading(false);
+    setIsStreaming(true);
+    sendUpdate({ status: 'live' });
+    const url = getWaafStreamUrl();
+    Alert.alert(
+      'Вы в эфире',
+      url ? `Смотреть на WAAF:\n${url}` : 'Эфир запущен',
+    );
   };
 
   const toggleMic = () => {
@@ -1271,7 +1312,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                 video={videoConfig} 
                 audio={audioConfig}
                 isZoomEnabled={true}
-                onConnectionSuccess={() => { setIsLoading(false); setIsStreaming(true); sendUpdate({ status: 'live' }); Alert.alert("Успех", "Вы в эфире!"); }}
+                onConnectionSuccess={handleStreamConnected}
                 onConnectionFailed={(e) => { setIsLoading(false); setIsStreaming(false); Alert.alert("Ошибка подключения", "Код: " + e); }}
                 onDisconnect={() => { setIsStreaming(false); setIsLoading(false); }}
             />
@@ -1289,6 +1330,14 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             <View style={styles.timerBox}><Text style={styles.timerText}>{formatTimer(displaySeconds)}</Text><Text style={styles.periodText}>{period === 0 ? 'Разминка' : period === 1 ? '1-й Тайм' : period === 2 ? 'Перерыв' : period === 3 ? '2-й Тайм' : period === 4 ? 'Перерыв (ДВ)' : period === 5 ? 'Доп. время 1' : period === 6 ? 'Доп. время 2' : period === 7 ? '⚽ Пенальти' : 'Завершён'}</Text></View>
             <View style={styles.headerInfo}><Text style={styles.matchTitle}>{match.team_home} vs {match.team_away}</Text></View>
         </View>
+        {isStreaming && match.id ? (
+            <TouchableOpacity
+              style={styles.waafLinkRow}
+              onPress={() => Share.share({ message: getWaafStreamUrl(), title: 'WAAF stream' })}
+            >
+              <Text style={styles.waafLinkText}>WAAF: /stream/{match.id} (поделиться)</Text>
+            </TouchableOpacity>
+        ) : null}
 
         <View style={styles.scoreboard}>
             <View style={styles.teamControl}>
@@ -1520,6 +1569,8 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   backButton: { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8 },
   matchTitle: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+  waafLinkRow: { alignSelf: 'center', marginTop: 4, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(26,67,132,0.85)', borderRadius: 8 },
+  waafLinkText: { color: '#a8d4ff', fontSize: 12, fontWeight: '600' },
   timerBox: { alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 25, paddingVertical: 5, borderRadius: 12, borderWidth: 1, borderColor: '#e31e24' },
   timerText: { color: 'white', fontSize: 28, fontWeight: '900', fontVariant: ['tabular-nums'] },
   periodText: { color: '#e31e24', fontSize: 10, fontWeight: 'bold', textTransform: 'uppercase' },
