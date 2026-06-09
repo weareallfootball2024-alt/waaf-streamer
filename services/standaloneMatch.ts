@@ -37,6 +37,44 @@ export function buildStandaloneMatch(ctx: StandaloneMatchContext) {
   };
 }
 
+export type StandaloneLiveResponse = {
+  match: Record<string, unknown> & {
+    id: number;
+    team_home: string;
+    team_away: string;
+    logo_home?: string | null;
+    score_home: number;
+    score_away: number;
+    allow_stream: number;
+    sport_type: string;
+    half_duration: number;
+    current_period: number;
+    standalone: boolean;
+  };
+  sessionToken: string;
+  accessCode: string;
+};
+
+export async function createStandaloneLiveMatch(
+  ctx: StandaloneMatchContext,
+): Promise<StandaloneLiveResponse> {
+  const res = await fetch(`${API_URL}/api/matches/standalone-live`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      club_id: ctx.clubId,
+      team_home: ctx.teamHome,
+      team_away: ctx.teamAway,
+      club_logo_url: ctx.clubLogoUri || undefined,
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Не удалось создать матч');
+  }
+  return data;
+}
+
 export async function searchPublicClubs(query: string): Promise<PublicClub[]> {
   const q = query.trim();
   if (!q) return [];

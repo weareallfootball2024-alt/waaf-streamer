@@ -34,8 +34,9 @@ import {
   getStreamSetupHint,
   loadStreamSettings,
 } from '../../services/streamConfig';
+import { getPlaylistSessionRtmp } from '../../services/vkPlaylistSession';
 import {
-  buildStandaloneMatch,
+  createStandaloneLiveMatch,
   searchPublicClubs,
   type PublicClub,
   type StandaloneMatchContext,
@@ -518,14 +519,19 @@ export default function App() {
       setIsStandaloneSession(false);
   };
 
-  const startStandaloneMatch = (ctx: StandaloneMatchContext) => {
-      setSelectedMatch(buildStandaloneMatch(ctx));
-      setMatchRoster([]);
-      setIsStandaloneSession(true);
-      setOperatorToken(null);
-      setMatchAccessCode(null);
-      setMatchSessionToken(null);
-      setCurrentScreen('control');
+  const startStandaloneMatch = async (ctx: StandaloneMatchContext) => {
+      try {
+          const data = await createStandaloneLiveMatch(ctx);
+          setSelectedMatch({ ...data.match, standalone: true });
+          setMatchRoster([]);
+          setIsStandaloneSession(true);
+          setOperatorToken(null);
+          setMatchAccessCode(data.accessCode);
+          setMatchSessionToken(data.sessionToken);
+          setCurrentScreen('control');
+      } catch (e: unknown) {
+          Alert.alert('Ошибка', e instanceof Error ? e.message : 'Не удалось создать матч');
+      }
   };
 
   const handleBackToSchedule = async () => {
@@ -690,7 +696,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   const opAuth = { sessionToken, accessCode, operatorToken };
   const opFetch = (path, options = {}) => operatorFetch(path, opAuth, options);
   const matchApi = (path: string, options = {}) => {
-    if (!isStandalone && match.id) opFetch(path, options).catch(() => {});
+    if (match.id) opFetch(path, options).catch(() => {});
   };
   
   // Состояния
@@ -793,7 +799,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
 
   // Синхронизация таймера с сервером при входе в экран
   useEffect(() => {
-    if (isStandalone || !match.id) return;
+    if (!match.id) return;
     fetch(`${API_URL}/api/match/${match.id}/timer/sync`)
       .then(r => r.json())
       .then(sync => {
@@ -807,7 +813,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
         }
       })
       .catch(() => {});
-  }, [match.id, isStandalone]);
+  }, [match.id]);
 
   // Локальный визуальный тик — пересчитывает время каждую секунду по серверной формуле
   useEffect(() => {
@@ -847,7 +853,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       if (updates.period !== undefined) setPeriod(updates.period);
       if (updates.score_home !== undefined) setScore((s) => ({ ...s, home: updates.score_home }));
       if (updates.score_away !== undefined) setScore((s) => ({ ...s, away: updates.score_away }));
-      if (isStandalone) return;
+      if (!match.id) return;
 
       const currentSec = getCurrentDisplaySeconds();
       const payload: any = {
@@ -874,7 +880,6 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       if (updates.finish_type !== undefined) payload.finish_type = updates.finish_type;
       if (updates.winner_team_id !== undefined) payload.winner_team_id = updates.winner_team_id;
       
-      // 🔥 Авторизация пульта: access_code (PIN-режим)
       if (accessCode) payload.access_code = accessCode;
       if (operatorToken) payload.operator_token = operatorToken;
 
@@ -904,7 +909,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     } else {
         try {
             const settings = await loadStreamSettings();
-            const rtmp = getActiveRtmpConfig(settings);
+            const rtmp = getActiveRtmpConfig(settings, match.id);
             if (!rtmp) {
                 Alert.alert(
                     "Настройте трансляцию",
@@ -917,14 +922,27 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             setIsStreaming(true);
             sendUpdate({ status: 'live' });
 
-            if (!isStandalone && rtmp.platform === 'vk' && settings.vk.embedUrl?.trim()) {
-                matchApi(`/api/match/${match.id}/stream-config`, {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        vk_stream_url: settings.vk.embedUrl.trim(),
-                        match_stream_key: settings.vk.streamKey.trim(),
-                    }),
-                }).catch(() => {});
+            if (rtmp.platform === 'vk' && match.id) {
+                let vkRtmpUrl = settings.vk.rtmpUrl?.trim() || '';
+                let vkStreamKey = settings.vk.streamKey?.trim() || '';
+                if (settings.vk.streamTarget === 'playlist') {
+                    const session = getPlaylistSessionRtmp();
+                    if (session) {
+                        vkRtmpUrl = session.rtmpUrl.replace(/\/+$/, '');
+                        vkStreamKey = session.streamKey;
+                    }
+                }
+                if (vkRtmpUrl && vkStreamKey) {
+                    matchApi(`/api/match/${match.id}/stream-config`, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            vk_stream_url: settings.vk.embedUrl?.trim() || null,
+                            vk_rtmp_url: vkRtmpUrl,
+                            vk_stream_key: vkStreamKey,
+                            match_stream_key: vkStreamKey,
+                        }),
+                    }).catch(() => {});
+                }
             }
 
             if (AudioHelper) AudioHelper.setMicrophoneMute(isMuted);
@@ -1127,8 +1145,8 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
 
   // 🔥 ИСПРАВЛЕНО: Рабочая функция отмены
   const handleUndo = () => {
-      if (isStandalone) {
-          Alert.alert('Локальный режим', 'Отмена событий доступна только в турнире на платформе');
+      if (!match.id) {
+          Alert.alert('Ошибка', 'Матч не привязан к серверу');
           return;
       }
       Alert.alert(
