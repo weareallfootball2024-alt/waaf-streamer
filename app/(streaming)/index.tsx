@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -6,7 +6,6 @@ import {
     FlatList,
     Image,
     Modal,
-    NativeModules,
     PermissionsAndroid, Platform,
     SafeAreaView,
     ScrollView,
@@ -18,12 +17,12 @@ import {
     View
 } from 'react-native';
 
-import { ApiVideoLiveStreamView } from '@api.video/react-native-livestream';
+import { WaafLivestreamView, type WaafLivestreamViewRef } from 'waaf-livestream';
 import * as ImagePicker from 'expo-image-picker';
 import * as ScreenOrientation from 'expo-screen-orientation';
 
 import { API_URL } from '../../constants/api';
-import { parseOperatorToken, StreamSettings } from '../../constants/streamPlatforms';
+import { parseOperatorToken } from '../../constants/streamPlatforms';
 import { StreamSettingsScreen } from '../../components/StreamSettingsScreen';
 import {
   fetchTournamentMatches,
@@ -33,9 +32,9 @@ import {
 import {
   getActiveRtmpConfig,
   getStreamSetupHint,
+  getVkShareUrl,
   loadStreamSettings,
 } from '../../services/streamConfig';
-import { getPlaylistSessionRtmp } from '../../services/vkPlaylistSession';
 import {
   createStandaloneLiveMatch,
   searchPublicClubs,
@@ -46,7 +45,17 @@ import { formatTimer, getActualSeconds } from '../../utils/matchTimer';
 import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
 
-const { AudioHelper } = NativeModules;
+function getPeriodLabel(period: number): string {
+  if (period === 0) return 'Разминка';
+  if (period === 1) return '1-й тайм';
+  if (period === 2) return 'Перерыв';
+  if (period === 3) return '2-й тайм';
+  if (period === 4) return 'Перерыв (ДВ)';
+  if (period === 5) return 'Доп. время 1';
+  if (period === 6) return 'Доп. время 2';
+  if (period === 7) return 'Пенальти';
+  return 'Завершён';
+}
 
 // ==================================================
 // ЭКРАН 1: ВВОД ID ТУРНИРА
@@ -692,7 +701,8 @@ function RosterEditScreen({ match, allPlayers, onSave, onBack, accessCode = null
 // MATCH CONTROL SCREEN (ГОЛЫ + АССИСТЕНТЫ + JAVA ЗВУК)
 // ==================================================
 function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, sessionToken = null, operatorToken = null, onOpenSettings }) {
-  const videoRef = useRef(null);
+  const videoRef = useRef<WaafLivestreamViewRef>(null);
+  const [vkShareUrl, setVkShareUrl] = useState('');
   const isStandalone = !!match.standalone;
   const opAuth = { sessionToken, accessCode, operatorToken };
   const opFetch = (path, options = {}) => operatorFetch(path, opAuth, options);
@@ -825,69 +835,27 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   }, [timerBase, timerUpdatedAt, isTimerRunning, timerDirection]);
 
   useEffect(() => {
-      return () => {
-          if (AudioHelper && canStream) {
-              AudioHelper.setMicrophoneMute(false);
-          }
-      };
-  }, [canStream]);
+    loadStreamSettings().then((settings) => {
+      const url = getVkShareUrl(settings);
+      if (url) setVkShareUrl(url);
+    });
+  }, []);
 
-  const audioConfig = useMemo(() => ({
-      bitrate: 128 * 1000,
-      sampleRate: 44100,
-      isStereo: true,
-  }), []); 
-
-  const videoConfig = useMemo(() => ({
-      fps: 30,
-      resolution: '720p',
-      bitrate: 2000 * 1000,
-      gopDuration: 1 
-  }), []);
+  useEffect(() => {
+    if (!canStream || !videoRef.current) return;
+    videoRef.current.updateScoreboard({
+      teamHome: match.team_home || 'Хозяева',
+      teamAway: match.team_away || 'Гости',
+      scoreHome: score.home,
+      scoreAway: score.away,
+      timer: formatTimer(displaySeconds),
+      period: getPeriodLabel(period),
+    }).catch(() => {});
+  }, [canStream, match.team_home, match.team_away, score.home, score.away, displaySeconds, period]);
 
   // Получает актуальное время для записи в событие (то, что видит зритель)
   const getCurrentDisplaySeconds = () => {
     return getActualSeconds(timerBase, timerUpdatedAt, isTimerRunning, timerDirection);
-  };
-
-  const getWaafStreamUrl = () => (match.id ? `${API_URL}/stream/${match.id}` : '');
-
-  const saveVkStreamConfig = async (settings: StreamSettings): Promise<boolean> => {
-    if (!match.id) return true;
-    let vkRtmpUrl = settings.vk.rtmpUrl?.trim() || '';
-    let vkStreamKey = settings.vk.streamKey?.trim() || '';
-    if (settings.vk.streamTarget === 'playlist') {
-      const session = getPlaylistSessionRtmp();
-      if (session) {
-        vkRtmpUrl = session.rtmpUrl.replace(/\/+$/, '');
-        vkStreamKey = session.streamKey;
-      }
-    }
-    const needsVkKeys = settings.activePlatform === 'vk' && settings.vk.vkRelayThroughWaaf;
-    if (needsVkKeys && (!vkRtmpUrl || !vkStreamKey)) {
-      Alert.alert('VK', 'Укажите RTMP URL и ключ VK в настройках трансляции');
-      return false;
-    }
-    try {
-      const res = await opFetch(`/api/match/${match.id}/stream-config`, {
-        method: 'POST',
-        body: JSON.stringify({
-          vk_stream_url: settings.vk.embedUrl?.trim() || null,
-          vk_rtmp_url: vkRtmpUrl || null,
-          vk_stream_key: vkStreamKey || null,
-          match_stream_key: vkStreamKey || null,
-        }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        Alert.alert('Ошибка', data.error || 'Не удалось сохранить настройки VK');
-        return false;
-      }
-      return true;
-    } catch {
-      Alert.alert('Ошибка', 'Не удалось сохранить настройки VK');
-      return false;
-    }
   };
 
   const sendUpdate = (updates: any = {}, eventType: string | null = null, playerId: any = null, teamId: any = null, isHighlight = false, assistantId: any = null) => {
@@ -961,19 +929,9 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                 return;
             }
 
-            if (rtmp.relayToVk || (settings.activePlatform === 'vk' && settings.vk.vkRelayThroughWaaf)) {
-                const saved = await saveVkStreamConfig(settings);
-                if (!saved) return;
-            }
-
             await videoRef.current?.startStreaming(rtmp.streamKey, rtmp.rtmpUrl);
             waitingConnection = true;
-
-            if (rtmp.platform === 'vk' && match.id && !settings.vk.vkRelayThroughWaaf) {
-                saveVkStreamConfig(settings).catch(() => {});
-            }
-
-            if (AudioHelper) AudioHelper.setMicrophoneMute(isMuted);
+            await videoRef.current?.setMuted(isMuted);
         } catch (e: any) {
             console.error(e);
             setIsStreaming(false);
@@ -988,19 +946,16 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     setIsLoading(false);
     setIsStreaming(true);
     sendUpdate({ status: 'live' });
-    const url = getWaafStreamUrl();
     Alert.alert(
       'Вы в эфире',
-      url ? `Смотреть на WAAF:\n${url}` : 'Эфир запущен',
+      vkShareUrl ? `Трансляция VK:\n${vkShareUrl}` : 'Эфир в VK запущен со счётом в кадре',
     );
   };
 
   const toggleMic = () => {
       const newState = !isMuted;
       setIsMuted(newState);
-      if (AudioHelper) {
-          AudioHelper.setMicrophoneMute(newState); 
-      }
+      videoRef.current?.setMuted(newState).catch(() => {});
   };
 
   const handleTimerAction = (action: string) => {
@@ -1305,15 +1260,17 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       <View style={StyleSheet.absoluteFill}>
           {/* 🔥 ИСПРАВЛЕНО: Глубокий черный экран для экономии батареи, если стрим выключен */}
           {canStream ? (
-            <ApiVideoLiveStreamView 
+            <WaafLivestreamView
                 ref={videoRef}
                 style={{ flex: 1 }}
                 camera="back"
-                video={videoConfig} 
-                audio={audioConfig}
-                isZoomEnabled={true}
                 onConnectionSuccess={handleStreamConnected}
-                onConnectionFailed={(e) => { setIsLoading(false); setIsStreaming(false); Alert.alert("Ошибка подключения", "Код: " + e); }}
+                onConnectionFailed={(e: { nativeEvent?: { code?: string }; code?: string }) => {
+                  setIsLoading(false);
+                  setIsStreaming(false);
+                  const code = e?.nativeEvent?.code ?? e?.code ?? 'unknown';
+                  Alert.alert('Ошибка подключения', `Код: ${code}`);
+                }}
                 onDisconnect={() => { setIsStreaming(false); setIsLoading(false); }}
             />
           ) : ( 
@@ -1330,12 +1287,12 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             <View style={styles.timerBox}><Text style={styles.timerText}>{formatTimer(displaySeconds)}</Text><Text style={styles.periodText}>{period === 0 ? 'Разминка' : period === 1 ? '1-й Тайм' : period === 2 ? 'Перерыв' : period === 3 ? '2-й Тайм' : period === 4 ? 'Перерыв (ДВ)' : period === 5 ? 'Доп. время 1' : period === 6 ? 'Доп. время 2' : period === 7 ? '⚽ Пенальти' : 'Завершён'}</Text></View>
             <View style={styles.headerInfo}><Text style={styles.matchTitle}>{match.team_home} vs {match.team_away}</Text></View>
         </View>
-        {isStreaming && match.id ? (
+        {isStreaming && vkShareUrl ? (
             <TouchableOpacity
               style={styles.waafLinkRow}
-              onPress={() => Share.share({ message: getWaafStreamUrl(), title: 'WAAF stream' })}
+              onPress={() => Share.share({ message: vkShareUrl, title: 'VK трансляция' })}
             >
-              <Text style={styles.waafLinkText}>WAAF: /stream/{match.id} (поделиться)</Text>
+              <Text style={styles.waafLinkText}>VK: поделиться ссылкой</Text>
             </TouchableOpacity>
         ) : null}
 

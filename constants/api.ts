@@ -6,7 +6,7 @@ function trimSlash(s: string): string {
 
 export const API_URL = trimSlash(process.env.EXPO_PUBLIC_API_URL || DEFAULT_API);
 
-/** Полный RTMP URL до сегмента live/ (как ожидает api.video startStreaming). */
+/** Полный RTMP URL до сегмента live/ (для WAAF ingest, если понадобится). */
 export function getRtmpLiveUrl(): string {
   const fromEnv = process.env.EXPO_PUBLIC_RTMP_LIVE_URL;
   if (fromEnv) {

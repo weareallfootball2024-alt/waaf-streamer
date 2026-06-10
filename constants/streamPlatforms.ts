@@ -11,8 +11,6 @@ export type PlatformConfig = {
 
 export type VkPlatformConfig = PlatformConfig & {
   streamTarget: VkStreamTarget;
-  /** Телефон → WAAF RTMP → ffmpeg overlay → VK (счёт в кадре) */
-  vkRelayThroughWaaf: boolean;
   communityId?: number;
   communityName?: string;
   communityPhoto?: string;
@@ -49,7 +47,6 @@ export const DEFAULT_STREAM_SETTINGS: StreamSettings = {
   vk: {
     ...emptyPlatform(true),
     streamTarget: 'wall',
-    vkRelayThroughWaaf: true,
     communityId: undefined,
     communityName: undefined,
   },

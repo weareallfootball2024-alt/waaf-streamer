@@ -1,14 +1,22 @@
-const { withSettingsGradle } = require('@expo/config-plugins');
+const { withSettingsGradle, withProjectBuildGradle } = require('@expo/config-plugins');
+
+function addJitpack(content) {
+  if (content.includes('jitpack.io')) return content;
+  return content.replace(
+    /repositories\s*\{/,
+    `repositories {
+        maven { url 'https://jitpack.io' }`,
+  );
+}
 
 module.exports = function withJitpack(config) {
-  return withSettingsGradle(config, (config) => {
-    if (!config.modResults.contents.includes('https://jitpack.io')) {
-      config.modResults.contents = config.modResults.contents.replace(
-        /repositories\s*{/g,
-        `repositories {
-        maven { url 'https://jitpack.io' }`
-      );
-    }
-    return config;
+  config = withSettingsGradle(config, (cfg) => {
+    cfg.modResults.contents = addJitpack(cfg.modResults.contents);
+    return cfg;
   });
+  config = withProjectBuildGradle(config, (cfg) => {
+    cfg.modResults.contents = addJitpack(cfg.modResults.contents);
+    return cfg;
+  });
+  return config;
 };

@@ -37,11 +37,13 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      "./jitpack-plugin.js",
       [
         "expo-build-properties",
         {
           "android": {
-            "usesCleartextTraffic": true
+            "usesCleartextTraffic": true,
+            "minSdkVersion": 24
           }
         }
       ],

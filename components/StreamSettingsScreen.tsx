@@ -352,18 +352,8 @@ export function StreamSettingsScreen({ onClose }: Props) {
                   </TouchableOpacity>
                 </View>
 
-                <TouchableOpacity
-                  style={[styles.platformChip, vk.vkRelayThroughWaaf && styles.platformChipActive, { marginBottom: 10 }]}
-                  onPress={() => updatePlatform('vk', { vkRelayThroughWaaf: !vk.vkRelayThroughWaaf })}
-                >
-                  <Text style={[styles.platformChipText, vk.vkRelayThroughWaaf && styles.platformChipTextActive]}>
-                    Счёт в VK-эфире (через WAAF)
-                  </Text>
-                </TouchableOpacity>
-                <Text style={styles.hint}>
-                  {vk.vkRelayThroughWaaf
-                    ? 'Телефон стримит на WAAF, сервер накладывает счёт и отправляет в VK. RTMP URL и ключ VK — ниже.'
-                    : 'Прямой RTMP в VK без счёта в кадре (только табло на телефоне оператора).'}
+                <Text style={[styles.hint, { marginBottom: 10 }]}>
+                  Счёт и таймер вшиваются в видео на телефоне и уходят в VK вместе с эфиром.
                 </Text>
 
                 {vk.streamTarget === 'wall' && (

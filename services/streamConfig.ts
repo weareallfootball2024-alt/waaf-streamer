@@ -1,6 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
 
-import { getRtmpLiveUrl } from '../constants/api';
 import {
   DEFAULT_STREAM_SETTINGS,
   StreamPlatform,
@@ -15,9 +14,6 @@ function normalizeVkConfig(vk: Partial<VkPlatformConfig> | undefined): VkPlatfor
   const base = { ...DEFAULT_STREAM_SETTINGS.vk, ...vk };
   if (!base.streamTarget) {
     base.streamTarget = 'wall';
-  }
-  if (base.vkRelayThroughWaaf === undefined) {
-    base.vkRelayThroughWaaf = true;
   }
   return base;
 }
@@ -54,8 +50,8 @@ export async function saveStreamSettings(settings: StreamSettings): Promise<void
 
 export function getActiveRtmpConfig(
   settings: StreamSettings,
-  matchId?: number | null,
-): { rtmpUrl: string; streamKey: string; platform: StreamPlatform; relayToVk?: boolean } | null {
+  _matchId?: number | null,
+): { rtmpUrl: string; streamKey: string; platform: StreamPlatform } | null {
   const platform = settings.activePlatform;
   const cfg = settings[platform];
   if (!cfg?.enabled) return null;
@@ -66,27 +62,10 @@ export function getActiveRtmpConfig(
     if (settings.vk.streamTarget === 'playlist') {
       const session = getPlaylistSessionRtmp();
       if (!session) return null;
-      if (settings.vk.vkRelayThroughWaaf && matchId) {
-        return {
-          rtmpUrl: getRtmpLiveUrl(),
-          streamKey: `match_${matchId}`,
-          platform,
-          relayToVk: true,
-        };
-      }
       return { ...session, platform };
     }
 
     if (!cfg.rtmpUrl?.trim() || !cfg.streamKey?.trim()) return null;
-
-    if (settings.vk.vkRelayThroughWaaf && matchId) {
-      return {
-        rtmpUrl: getRtmpLiveUrl(),
-        streamKey: `match_${matchId}`,
-        platform,
-        relayToVk: true,
-      };
-    }
 
     const url = cfg.rtmpUrl.trim();
     return {
@@ -115,10 +94,16 @@ export function getStreamSetupHint(settings: StreamSettings): string {
   if (settings.vk.streamTarget === 'playlist') {
     return 'Вставьте RTMP URL и ключ из VK Studio для этой трансляции (режим плейлист) и нажмите «Применить для эфира»';
   }
-  if (settings.vk.vkRelayThroughWaaf) {
-    return 'RTMP VK из Studio сохраните в настройках — сервер WAAF добавит счёт в эфир и отправит в VK';
+  return 'Скопируйте RTMP URL и ключ из VK Studio → Ключи и виджеты. Счёт вшивается в эфир на телефоне.';
+}
+
+export function getVkShareUrl(settings: StreamSettings): string | null {
+  const embed = settings.vk.embedUrl?.trim();
+  if (embed) return embed;
+  if (settings.vk.communityId) {
+    return `https://vk.com/club${settings.vk.communityId}`;
   }
-  return 'Скопируйте постоянный RTMP URL и ключ из VK Studio → Ключи и виджеты (режим стена)';
+  return null;
 }
 
 export function isStreamConfigured(settings: StreamSettings): boolean {

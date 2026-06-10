@@ -1,0 +1,25 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.waflivestream'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.waflivestream"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+}
+
+repositories {
+  mavenCentral()
+  google()
+  maven { url 'https://jitpack.io' }
+}
+
+dependencies {
+  implementation 'com.github.pedroSG94.RootEncoder:library:2.7.2'
+}
