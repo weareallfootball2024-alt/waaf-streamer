@@ -14,12 +14,22 @@ android {
   }
 }
 
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+  compilerOptions {
+    freeCompilerArgs.add("-Xskip-metadata-version-check")
+  }
+}
+
 repositories {
+  maven { url uri("${rootProject.projectDir}/local-maven") }
   mavenCentral()
   google()
   maven { url 'https://jitpack.io' }
 }
 
 dependencies {
-  implementation 'com.github.pedroSG94.RootEncoder:library:2.7.2'
+  implementation('com.github.pedroSG94.RootEncoder:library:2.7.2') {
+    exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib'
+    exclude group: 'org.jetbrains.kotlinx', module: 'kotlinx-coroutines-android'
+  }
 }
