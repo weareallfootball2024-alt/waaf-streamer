@@ -15,10 +15,15 @@ import {
   DEFAULT_STREAM_SETTINGS,
   PLATFORM_LABELS,
   STUB_PLATFORMS,
+  STREAM_QUALITY_HINTS,
+  STREAM_QUALITY_LABELS,
   StreamPlatform,
+  StreamQuality,
   StreamSettings,
   VkStreamTarget,
 } from '../constants/streamPlatforms';
+import { clearSession, getUser, login, restoreSession, saveSession } from '../services/authSession';
+import { linkWaafAccount } from '../services/streamApi';
 import { loadStreamSettings, saveStreamSettings } from '../services/streamConfig';
 import { setPlaylistSessionRtmp } from '../services/vkPlaylistSession';
 import {
@@ -26,11 +31,13 @@ import {
   fetchAdminGroups,
   fetchGroupAlbums,
   getStoredVkToken,
+  getStoredVkUserId,
   loginWithVk,
   resolveCommunity,
   VkAlbum,
   VkGroup,
 } from '../services/vkAuth';
+import type { StaffUser } from '../utils/roles';
 
 type Props = {
   onClose: () => void;
@@ -55,6 +62,12 @@ export function StreamSettingsScreen({ onClose }: Props) {
   const [groupsError, setGroupsError] = useState<string | null>(null);
   const [communityInput, setCommunityInput] = useState('');
   const [resolveLoading, setResolveLoading] = useState(false);
+  const [waafUser, setWaafUser] = useState<StaffUser | null>(null);
+  const [waafPhone, setWaafPhone] = useState('');
+  const [waafPassword, setWaafPassword] = useState('');
+  const [waafLoading, setWaafLoading] = useState(false);
+  const [vkUserId, setVkUserId] = useState<string | null>(null);
+  const [linkMode, setLinkMode] = useState(false);
 
   const loadAlbums = async (groupId: number) => {
     setAlbumsLoading(true);
@@ -73,7 +86,11 @@ export function StreamSettingsScreen({ onClose }: Props) {
       const saved = await loadStreamSettings();
       setSettings(saved);
       const token = await getStoredVkToken();
+      const storedVkId = await getStoredVkUserId();
+      setVkUserId(storedVkId);
       setVkLoggedIn(!!token);
+      const user = (await restoreSession()) || (await getUser());
+      setWaafUser(user);
       if (token) {
         try {
           const list = await fetchAdminGroups(token);
@@ -121,6 +138,7 @@ export function StreamSettingsScreen({ onClose }: Props) {
     try {
       const token = await loginWithVk();
       setVkLoggedIn(true);
+      setVkUserId(await getStoredVkUserId());
       try {
         const list = await fetchAdminGroups(token);
         setGroups(list);
@@ -141,8 +159,61 @@ export function StreamSettingsScreen({ onClose }: Props) {
     }
   };
 
+  const handleWaafLogin = async () => {
+    if (!waafPhone.trim() || !waafPassword) {
+      Alert.alert('WAAF', 'Введите телефон и пароль');
+      return;
+    }
+    setWaafLoading(true);
+    try {
+      const result = await login(waafPhone.trim(), waafPassword);
+      if (!result.ok || !result.user) {
+        Alert.alert('WAAF', result.error || 'Ошибка входа');
+        return;
+      }
+      setWaafUser(result.user);
+      setWaafPassword('');
+      setLinkMode(false);
+      Alert.alert('Готово', `Вошли как ${result.user.full_name || 'пользователь WAAF'}`);
+    } finally {
+      setWaafLoading(false);
+    }
+  };
+
+  const handleWaafLogout = async () => {
+    await clearSession();
+    setWaafUser(null);
+    setLinkMode(false);
+  };
+
+  const handleLinkWaaf = async () => {
+    const vkId = vkUserId || (await getStoredVkUserId());
+    if (!vkId) {
+      Alert.alert('VK', 'Сначала войдите через VK');
+      return;
+    }
+    if (!waafPhone.trim() || !waafPassword) {
+      Alert.alert('WAAF', 'Введите телефон и пароль аккаунта WAAF');
+      return;
+    }
+    setWaafLoading(true);
+    try {
+      const data = await linkWaafAccount(waafPhone.trim(), waafPassword, vkId);
+      await saveSession(data.token, data.user as StaffUser);
+      setWaafUser(data.user as StaffUser);
+      setWaafPassword('');
+      setLinkMode(false);
+      Alert.alert('Готово', 'VK привязан к аккаунту WAAF');
+    } catch (e: unknown) {
+      Alert.alert('Ошибка', e instanceof Error ? e.message : 'Не удалось привязать');
+    } finally {
+      setWaafLoading(false);
+    }
+  };
+
   const handleVkLogout = async () => {
     await clearVkToken();
+    setVkUserId(null);
     setVkLoggedIn(false);
     setGroups([]);
     setAlbums([]);
@@ -229,6 +300,83 @@ export function StreamSettingsScreen({ onClose }: Props) {
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+        <Text style={styles.sectionTitle}>Качество трансляции</Text>
+        <View style={styles.platformRow}>
+          {(['high', 'medium', 'low', 'auto'] as StreamQuality[]).map((q) => {
+            const active = settings.streamQuality === q;
+            return (
+              <TouchableOpacity
+                key={q}
+                style={[styles.platformChip, active && styles.platformChipActive]}
+                onPress={() => setSettings((prev) => ({ ...prev, streamQuality: q }))}
+              >
+                <Text style={[styles.platformChipText, active && styles.platformChipTextActive]}>
+                  {STREAM_QUALITY_LABELS[q]}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <Text style={styles.hint}>{STREAM_QUALITY_HINTS[settings.streamQuality]}</Text>
+
+        <Text style={styles.sectionTitle}>Аккаунт для оплаты эфира</Text>
+        <View style={styles.block}>
+          {waafUser ? (
+            <>
+              <Text style={styles.blockTitle}>WAAF: {waafUser.full_name || waafUser.phone}</Text>
+              <Text style={styles.hint}>
+                Организаторы и привязанные аккаунты оплачивают через WAAF. Турнирные матчи — бесплатно.
+              </Text>
+              <TouchableOpacity onPress={handleWaafLogout}>
+                <Text style={styles.linkOut}>Выйти из WAAF</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <Text style={styles.hint}>
+                Организатор — войдите по телефону WAAF. Остальные могут оплатить по VK ID после входа через VK ниже.
+              </Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Телефон"
+                placeholderTextColor="#666"
+                value={waafPhone}
+                onChangeText={setWaafPhone}
+                keyboardType="phone-pad"
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Пароль"
+                placeholderTextColor="#666"
+                value={waafPassword}
+                onChangeText={setWaafPassword}
+                secureTextEntry
+              />
+              <TouchableOpacity style={styles.btnVk} onPress={handleWaafLogin} disabled={waafLoading}>
+                {waafLoading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.btnVkText}>ВОЙТИ В WAAF</Text>
+                )}
+              </TouchableOpacity>
+              {vkLoggedIn && vkUserId && (
+                <TouchableOpacity
+                  style={[styles.btnApply, { marginTop: 10 }]}
+                  onPress={() => (linkMode ? handleLinkWaaf() : setLinkMode(true))}
+                  disabled={waafLoading}
+                >
+                  <Text style={styles.btnApplyText}>
+                    {linkMode ? 'ПРИВЯЗАТЬ VK К WAAF' : 'ПРИВЯЗАТЬ VK К АККАУНТУ WAAF'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </>
+          )}
+          {vkUserId && !waafUser && (
+            <Text style={[styles.hint, { marginTop: 10 }]}>VK ID: {vkUserId}</Text>
+          )}
+        </View>
+
         <Text style={styles.sectionTitle}>Куда стримить</Text>
         <View style={styles.platformRow}>
           {(Object.keys(PLATFORM_LABELS) as StreamPlatform[]).map((p) => {
@@ -339,7 +487,7 @@ export function StreamSettingsScreen({ onClose }: Props) {
                     onPress={() => setStreamTarget('wall')}
                   >
                     <Text style={[styles.platformChipText, vk.streamTarget === 'wall' && styles.platformChipTextActive]}>
-                      На стену
+                      На стену (постоянный ключ)
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
@@ -359,7 +507,10 @@ export function StreamSettingsScreen({ onClose }: Props) {
                 {vk.streamTarget === 'wall' && (
                   <>
                     <Text style={styles.hint}>
-                      VK Studio → Ключи и виджеты. URL: rtmp://ovsu.okcdn.ru/input/ или rtmps://pub.live.vkvideo.ru/app/ + ключ отдельно. Эфир сначала виден в Studio → Трансляции («Входящий сигнал»), затем на стене.
+                      Кабинет СООБЩЕСТВА в Studio → Ключи и виджеты. Постоянный ключ не всегда создаёт пост на стене автоматически.
+                    </Text>
+                    <Text style={[styles.hint, { color: '#ffcc66' }]}>
+                      Если на стене пусто: Управление сообществом → Разделы → включите «Трансляции». В Studio нажмите «В эфир». Или переключитесь на режим «Плейлист» — создайте трансляцию в Studio, вставьте её RTMP и «Применить для эфира».
                     </Text>
                     <TextInput
                       style={styles.input}

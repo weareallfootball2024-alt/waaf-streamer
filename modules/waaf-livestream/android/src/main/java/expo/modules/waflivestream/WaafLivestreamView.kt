@@ -31,9 +31,13 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   private val surfaceView = SurfaceView(context)
   private val microphoneSource = MicrophoneSource()
   private var scoreboardFilter: ImageObjectFilterRender? = null
+  private var eventFilter: ImageObjectFilterRender? = null
+  private var eventFilterAdded = false
+  private val clearEventRunnable = Runnable { hideEventBanner() }
   private var isPrepared = false
   private var isMuted = false
   private var scoreboardReady = false
+  private var encoderQuality: StreamQualityPreset = StreamQualityPreset.MEDIUM
 
   private var teamHome = "Хозяева"
   private var teamAway = "Гости"
@@ -118,7 +122,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     getGlInterface().autoHandleOrientation = true
     getStreamClient().apply {
       setReTries(3)
-      setDelay(300)
+      setDelay(0)
       setWriteChunkSize(4096)
     }
   }
@@ -133,7 +137,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
       override fun surfaceCreated(holder: SurfaceHolder) {
         if (!genericStream.isOnPreview) {
-          if (!isPrepared) prepareEncoder()
+          if (!isPrepared) prepareEncoder(encoderQuality)
           genericStream.startPreview(surfaceView)
         }
       }
@@ -158,17 +162,42 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     return if (o == Configuration.ORIENTATION_LANDSCAPE) 90 else 0
   }
 
-  private fun prepareEncoder() {
+  private fun prepareEncoder(quality: StreamQualityPreset) {
+    if (isPrepared && encoderQuality == quality) return
+
+    if (isPrepared) {
+      if (genericStream.isOnPreview) genericStream.stopPreview()
+      isPrepared = false
+    }
+
+    encoderQuality = quality
     val rotation = videoRotation()
     isPrepared = try {
-      genericStream.prepareVideo(1280, 720, 1_500_000, 30, 1, rotation)
+      genericStream.prepareVideo(quality.width, quality.height, quality.bitrate, quality.fps, 1, rotation)
         && genericStream.prepareAudio(44_100, true, 128_000)
     } catch (e: IllegalArgumentException) {
       Log.e(TAG, "prepareEncoder failed", e)
       false
     }
     if (isPrepared) {
-      Log.i(TAG, "encoder prepared 1280x720 rotation=$rotation")
+      Log.i(
+        TAG,
+        "encoder prepared ${quality.width}x${quality.height} ${quality.bitrate}bps rotation=$rotation",
+      )
+    }
+  }
+
+  fun setStreamQuality(quality: String) {
+    val preset = StreamQualityPreset.from(quality)
+    if (preset == encoderQuality && isPrepared) return
+    if (genericStream.isStreaming) return
+    prepareEncoder(preset)
+    if (!genericStream.isOnPreview) {
+      try {
+        genericStream.startPreview(surfaceView)
+      } catch (e: Exception) {
+        Log.w(TAG, "preview restart after quality change failed", e)
+      }
     }
   }
 
@@ -217,15 +246,16 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     }
   }
 
-  fun startStreaming(rtmpUrl: String, streamKey: String, muted: Boolean) {
+  fun startStreaming(rtmpUrl: String, streamKey: String, muted: Boolean, quality: String?) {
     mainHandler.removeCallbacks(publishRunnable)
     mainHandler.removeCallbacks(deferredFilterRunnable)
     stopStats()
     scoreboardReady = false
     scoreboardFilter = null
 
-    if (!isPrepared) {
-      prepareEncoder()
+    val preset = StreamQualityPreset.from(quality)
+    if (!isPrepared || encoderQuality != preset) {
+      prepareEncoder(preset)
       if (!isPrepared) {
         onConnectionFailed(mapOf("code" to "encoder_prepare_failed"))
         return
@@ -280,14 +310,61 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     if (genericStream.isStreaming) {
       genericStream.stopStream()
     }
+    hideEventBanner()
+    eventFilterAdded = false
     try {
       genericStream.getGlInterface().clearFilters()
     } catch (_: Exception) {
     }
+    scoreboardFilter = null
+    scoreboardReady = false
   }
 
   fun setMuted(muted: Boolean) {
     setMicrophoneMuted(muted)
+  }
+
+  fun showEventBanner(
+    eventType: String,
+    playerName: String,
+    playerNumber: String,
+    assistantName: String?,
+    assistantNumber: String?,
+    durationMs: Long = 6000,
+  ) {
+    mainHandler.removeCallbacks(clearEventRunnable)
+    val bitmap = EventOverlayRenderer.render(
+      eventType,
+      playerName,
+      playerNumber,
+      assistantName,
+      assistantNumber,
+    )
+    val filter = eventFilter ?: ImageObjectFilterRender().also { created ->
+      eventFilter = created
+      created.setScale(96f, 15f)
+      created.setPosition(TranslateTo.BOTTOM)
+    }
+    filter.setImage(bitmap)
+    if (scoreboardReady && !eventFilterAdded) {
+      genericStream.getGlInterface().addFilter(filter)
+      eventFilterAdded = true
+    }
+    Log.i(TAG, "event banner: $eventType #$playerNumber $playerName")
+    mainHandler.postDelayed(clearEventRunnable, durationMs)
+  }
+
+  private fun hideEventBanner() {
+    eventFilter?.let { filter ->
+      if (eventFilterAdded) {
+        try {
+          genericStream.getGlInterface().removeFilter(filter)
+        } catch (_: Exception) {
+        }
+        eventFilterAdded = false
+      }
+    }
+    eventFilter = null
   }
 
   fun updateScoreboard(payload: Map<String, Any?>) {

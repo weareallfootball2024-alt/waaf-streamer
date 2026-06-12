@@ -2,6 +2,22 @@ export type VkStreamTarget = 'wall' | 'playlist';
 
 export type StreamPlatform = 'vk' | 'youtube' | 'rutube' | 'waaf';
 
+export type StreamQuality = 'high' | 'medium' | 'low' | 'auto';
+
+export const STREAM_QUALITY_LABELS: Record<StreamQuality, string> = {
+  high: 'Высокое',
+  medium: 'Среднее',
+  low: 'Низкое',
+  auto: 'Авто',
+};
+
+export const STREAM_QUALITY_HINTS: Record<StreamQuality, string> = {
+  high: '1280×720 · 1,5 Мбит/с',
+  medium: '854×480 · 1,0 Мбит/с',
+  low: '640×360 · 0,5 Мбит/с',
+  auto: 'Подстраивается под интернет',
+};
+
 export type PlatformConfig = {
   enabled: boolean;
   rtmpUrl: string;
@@ -20,6 +36,7 @@ export type VkPlatformConfig = PlatformConfig & {
 
 export type StreamSettings = {
   activePlatform: StreamPlatform;
+  streamQuality: StreamQuality;
   vk: VkPlatformConfig;
   youtube: PlatformConfig;
   rutube: PlatformConfig;
@@ -44,6 +61,7 @@ const emptyPlatform = (enabled: boolean): PlatformConfig => ({
 
 export const DEFAULT_STREAM_SETTINGS: StreamSettings = {
   activePlatform: 'vk',
+  streamQuality: 'auto',
   vk: {
     ...emptyPlatform(true),
     streamTarget: 'wall',

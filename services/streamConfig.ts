@@ -3,9 +3,19 @@ import * as SecureStore from 'expo-secure-store';
 import {
   DEFAULT_STREAM_SETTINGS,
   StreamPlatform,
+  StreamQuality,
   StreamSettings,
   VkPlatformConfig,
 } from '../constants/streamPlatforms';
+
+const VALID_QUALITIES: StreamQuality[] = ['high', 'medium', 'low', 'auto'];
+
+function normalizeStreamQuality(value: unknown): StreamQuality {
+  if (typeof value === 'string' && VALID_QUALITIES.includes(value as StreamQuality)) {
+    return value as StreamQuality;
+  }
+  return DEFAULT_STREAM_SETTINGS.streamQuality;
+}
 import { getPlaylistSessionRtmp } from './vkPlaylistSession';
 
 const SETTINGS_KEY = 'waaf_stream_settings';
@@ -26,6 +36,7 @@ export async function loadStreamSettings(): Promise<StreamSettings> {
     return {
       ...DEFAULT_STREAM_SETTINGS,
       ...parsed,
+      streamQuality: normalizeStreamQuality(parsed.streamQuality),
       vk: normalizeVkConfig(parsed.vk),
       youtube: { ...DEFAULT_STREAM_SETTINGS.youtube, ...parsed.youtube },
       rutube: { ...DEFAULT_STREAM_SETTINGS.rutube, ...parsed.rutube },

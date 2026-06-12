@@ -7,6 +7,7 @@ import { API_URL } from '../constants/api';
 WebBrowser.maybeCompleteAuthSession();
 
 const VK_TOKEN_KEY = 'vk_access_token';
+const VK_USER_ID_KEY = 'vk_user_id';
 const APP_OAUTH_RETURN = Linking.createURL('oauth/vk');
 
 export type VkGroup = {
@@ -24,8 +25,13 @@ export async function getStoredVkToken(): Promise<string | null> {
   return SecureStore.getItemAsync(VK_TOKEN_KEY);
 }
 
+export async function getStoredVkUserId(): Promise<string | null> {
+  return SecureStore.getItemAsync(VK_USER_ID_KEY);
+}
+
 export async function clearVkToken(): Promise<void> {
   await SecureStore.deleteItemAsync(VK_TOKEN_KEY);
+  await SecureStore.deleteItemAsync(VK_USER_ID_KEY);
 }
 
 function parseAuthResultUrl(url: string) {
@@ -83,6 +89,9 @@ export async function loginWithVk(): Promise<string> {
   }
 
   await SecureStore.setItemAsync(VK_TOKEN_KEY, data.access_token);
+  if (data.user_id != null) {
+    await SecureStore.setItemAsync(VK_USER_ID_KEY, String(data.user_id));
+  }
   return data.access_token;
 }
 

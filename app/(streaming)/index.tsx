@@ -23,18 +23,27 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import { API_URL } from '../../constants/api';
 import { parseOperatorToken } from '../../constants/streamPlatforms';
 import { StandaloneMatchSetupScreen } from '../../components/StandaloneMatchSetupScreen';
+import { StandalonePayScreen } from '../../components/StandalonePayScreen';
 import { StreamSettingsScreen } from '../../components/StreamSettingsScreen';
 import {
   fetchTournamentMatches,
   operatorFetch,
   resolveOperatorToken,
 } from '../../services/operatorFetch';
+import type { StreamQuality } from '../../constants/streamPlatforms';
 import {
   getActiveRtmpConfig,
   getStreamSetupHint,
   getVkShareUrl,
   loadStreamSettings,
 } from '../../services/streamConfig';
+import {
+  adjustAutoQualityAfterStream,
+  resolveEncoderQuality,
+  type ResolvedStreamQuality,
+} from '../../services/streamQuality';
+import { checkStreamReadiness } from '../../services/streamReadiness';
+import { fetchStreamAccess, type StreamAccess } from '../../services/streamApi';
 import {
   createStandaloneLiveMatch,
   type StandaloneMatchContext,
@@ -276,6 +285,8 @@ export default function App() {
   const [pendingLinkToken, setPendingLinkToken] = useState('');
   const [settingsReturnScreen, setSettingsReturnScreen] = useState('step1_tourn');
   const [isStandaloneSession, setIsStandaloneSession] = useState(false);
+  const [pendingStandaloneCtx, setPendingStandaloneCtx] = useState<StandaloneMatchContext | null>(null);
+  const [standaloneAccess, setStandaloneAccess] = useState<StreamAccess | null>(null);
 
   const openSettings = (returnTo = 'step1_tourn') => {
       setSettingsReturnScreen(returnTo);
@@ -357,16 +368,60 @@ export default function App() {
       setIsStandaloneSession(false);
   };
 
+  const handleStandalonePress = async () => {
+      const readiness = await checkStreamReadiness();
+      if (!readiness.ok) {
+          Alert.alert(
+              'Сначала настройте трансляцию',
+              readiness.message,
+              [
+                  { text: 'В настройки', onPress: () => openSettings('step1_tourn') },
+                  { text: 'Отмена', style: 'cancel' },
+              ],
+          );
+          return;
+      }
+      setCurrentScreen('step_standalone_club');
+  };
+
+  const enterStandaloneControl = (data: Awaited<ReturnType<typeof createStandaloneLiveMatch>>) => {
+      setSelectedMatch({ ...data.match, standalone: true });
+      setMatchRoster([]);
+      setIsStandaloneSession(true);
+      setOperatorToken(null);
+      setMatchAccessCode(data.accessCode);
+      setMatchSessionToken(data.sessionToken);
+      setPendingStandaloneCtx(null);
+      setStandaloneAccess(null);
+      setCurrentScreen('control');
+  };
+
   const startStandaloneMatch = async (ctx: StandaloneMatchContext) => {
       try {
+          const access = await fetchStreamAccess();
+          if (!access.can_stream_standalone) {
+              if (access.needs_auth || access.needs_waaf_login) {
+                  Alert.alert(
+                      access.needs_waaf_login ? 'Вход WAAF' : 'Нужна авторизация',
+                      access.reason || 'Откройте настройки трансляции',
+                      [
+                          { text: 'В настройки', onPress: () => openSettings('step_standalone_club') },
+                          { text: 'OK', style: 'cancel' },
+                      ],
+                  );
+                  return;
+              }
+              if (access.needs_payment) {
+                  setPendingStandaloneCtx(ctx);
+                  setStandaloneAccess(access);
+                  setCurrentScreen('step_standalone_pay');
+                  return;
+              }
+              Alert.alert('Нет доступа', access.reason || 'Трансляция недоступна');
+              return;
+          }
           const data = await createStandaloneLiveMatch(ctx);
-          setSelectedMatch({ ...data.match, standalone: true });
-          setMatchRoster([]);
-          setIsStandaloneSession(true);
-          setOperatorToken(null);
-          setMatchAccessCode(data.accessCode);
-          setMatchSessionToken(data.sessionToken);
-          setCurrentScreen('control');
+          enterStandaloneControl(data);
       } catch (e: unknown) {
           Alert.alert('Ошибка', e instanceof Error ? e.message : 'Не удалось создать матч');
       }
@@ -393,7 +448,7 @@ export default function App() {
       return (
           <TournamentLoginScreen
               onNext={goToMatchList}
-              onStandalone={() => setCurrentScreen('step_standalone_club')}
+              onStandalone={handleStandalonePress}
               onOpenSettings={() => openSettings('step1_tourn')}
               initialToken={pendingLinkToken}
               onBackToModules={() => router.replace('/')}
@@ -406,6 +461,24 @@ export default function App() {
               onStart={startStandaloneMatch}
               onBack={handleBackToStart}
               onOpenSettings={() => openSettings('step_standalone_club')}
+          />
+      );
+  }
+  if (currentScreen === 'step_standalone_pay' && pendingStandaloneCtx && standaloneAccess) {
+      return (
+          <StandalonePayScreen
+              matchContext={pendingStandaloneCtx}
+              access={standaloneAccess}
+              onBack={() => setCurrentScreen('step_standalone_club')}
+              onOpenSettings={() => openSettings('step_standalone_pay')}
+              onPaid={async () => {
+                  try {
+                      const data = await createStandaloneLiveMatch(pendingStandaloneCtx);
+                      enterStandaloneControl(data);
+                  } catch (e: unknown) {
+                      Alert.alert('Ошибка', e instanceof Error ? e.message : 'Не удалось создать матч');
+                  }
+              }}
           />
       );
   }
@@ -533,8 +606,16 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   const videoRef = useRef<WaafLivestreamViewRef>(null);
   const streamStatsRef = useRef({ videoFrames: 0 });
   const streamHealthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const streamSessionRef = useRef<{
+    startTime: number;
+    quality: ResolvedStreamQuality;
+    hadDisconnect: boolean;
+  } | null>(null);
+  const pendingStreamQualityRef = useRef<ResolvedStreamQuality>('medium');
   const [vkShareUrl, setVkShareUrl] = useState('');
   const [streamHealth, setStreamHealth] = useState('');
+  const [encoderQuality, setEncoderQuality] = useState<ResolvedStreamQuality>('medium');
+  const streamQualitySettingRef = useRef<StreamQuality>('auto');
   const isStandalone = !!match.standalone;
   const opAuth = { sessionToken, accessCode, operatorToken };
   const opFetch = (path, options = {}) => operatorFetch(path, opAuth, options);
@@ -667,11 +748,30 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   }, [timerBase, timerUpdatedAt, isTimerRunning, timerDirection]);
 
   useEffect(() => {
-    loadStreamSettings().then((settings) => {
+    loadStreamSettings().then(async (settings) => {
       const url = getVkShareUrl(settings);
       if (url) setVkShareUrl(url);
+      streamQualitySettingRef.current = settings.streamQuality;
+      const resolved = await resolveEncoderQuality(settings.streamQuality);
+      setEncoderQuality(resolved);
     });
   }, []);
+
+  const finishAutoQualitySession = async (hadDisconnect = false) => {
+    const session = streamSessionRef.current;
+    streamSessionRef.current = null;
+    if (!session || streamQualitySettingRef.current !== 'auto') return;
+
+    const durationSec = Math.max(1, Math.round((Date.now() - session.startTime) / 1000));
+    await adjustAutoQualityAfterStream({
+      videoFrames: streamStatsRef.current.videoFrames,
+      durationSec,
+      hadDisconnect: hadDisconnect || session.hadDisconnect,
+      currentQuality: session.quality,
+    });
+    const resolved = await resolveEncoderQuality('auto');
+    setEncoderQuality(resolved);
+  };
 
   useEffect(() => {
     if (!canStream || !videoRef.current) return;
@@ -743,6 +843,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             await videoRef.current?.stopStreaming();
             setIsStreaming(false);
             sendUpdate({ status: 'scheduled' });
+            await finishAutoQualitySession(false);
             Alert.alert("Эфир остановлен");
         } catch (e: any) {
             Alert.alert("Ошибка остановки", e.message);
@@ -751,6 +852,9 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
         let waitingConnection = false;
         try {
             const settings = await loadStreamSettings();
+            streamQualitySettingRef.current = settings.streamQuality;
+            const quality = await resolveEncoderQuality(settings.streamQuality);
+            setEncoderQuality(quality);
             const rtmp = getActiveRtmpConfig(settings, match.id);
             if (!rtmp) {
                 Alert.alert(
@@ -768,7 +872,8 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             }
             const endpoint = buildRtmpEndpoint(rtmp.rtmpUrl, rtmp.streamKey);
             console.log('[stream] RTMP →', maskRtmpEndpoint(endpoint), 'muted=', isMuted);
-            await videoRef.current?.startStreaming(rtmp.streamKey, rtmp.rtmpUrl, isMuted);
+            pendingStreamQualityRef.current = quality;
+            await videoRef.current?.startStreaming(rtmp.streamKey, rtmp.rtmpUrl, isMuted, quality);
             waitingConnection = true;
         } catch (e: any) {
             console.error(e);
@@ -785,6 +890,11 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     setIsStreaming(true);
     sendUpdate({ status: 'live' });
     streamStatsRef.current.videoFrames = 0;
+    streamSessionRef.current = {
+      startTime: Date.now(),
+      quality: pendingStreamQualityRef.current,
+      hadDisconnect: false,
+    };
     if (streamHealthTimerRef.current) clearTimeout(streamHealthTimerRef.current);
     streamHealthTimerRef.current = setTimeout(() => {
       if (streamStatsRef.current.videoFrames < 10) {
@@ -1105,6 +1215,17 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       
       const assistantId = assistant ? assistant.id : null; 
 
+      const bannerTypes = ['goal', 'penalty', 'own_goal', 'yellow_card', 'red_card', 'second_yellow_card'];
+      if (bannerTypes.includes(selectedEventType) && player?.name && canStream) {
+        videoRef.current?.showEventBanner({
+          eventType: selectedEventType,
+          playerName: player.name,
+          playerNumber: player.number != null ? String(player.number) : '',
+          assistantName: assistant?.name,
+          assistantNumber: assistant?.number != null ? String(assistant.number) : undefined,
+        }).catch(() => {});
+      }
+
       if (['goal', 'penalty', 'own_goal'].includes(selectedEventType)) { 
           sendUpdate(updates, selectedEventType, player.id, teamId, isHighlight, assistantId); 
       } else { 
@@ -1123,10 +1244,16 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                 ref={videoRef}
                 style={{ flex: 1 }}
                 camera="back"
+                streamQuality={encoderQuality}
                 onConnectionSuccess={handleStreamConnected}
                 onConnectionFailed={(e: { nativeEvent?: { code?: string }; code?: string }) => {
                   setIsLoading(false);
                   setIsStreaming(false);
+                  if (streamSessionRef.current) {
+                    finishAutoQualitySession(true).catch(() => {});
+                  } else {
+                    streamSessionRef.current = null;
+                  }
                   const code = e?.nativeEvent?.code ?? e?.code ?? 'unknown';
                   const lower = code.toLowerCase();
                   const hint = code === 'auth_error'
@@ -1144,6 +1271,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                   setIsLoading(false);
                   setStreamHealth('');
                   if (streamHealthTimerRef.current) clearTimeout(streamHealthTimerRef.current);
+                  finishAutoQualitySession(true).catch(() => {});
                   Alert.alert(
                     'Эфир прерван',
                     'Соединение с VK RTMP разорвано. Проверьте интернет и ключ в VK Studio.',

@@ -1,4 +1,5 @@
 import { API_URL } from '../constants/api';
+import { streamAuthFetch } from './streamApi';
 
 export type PublicClub = {
   id: number;
@@ -60,9 +61,8 @@ export type StandaloneLiveResponse = {
 export async function createStandaloneLiveMatch(
   ctx: StandaloneMatchContext,
 ): Promise<StandaloneLiveResponse> {
-  const res = await fetch(`${API_URL}/api/matches/standalone-live`, {
+  const res = await streamAuthFetch('/api/matches/standalone-live', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       club_id: ctx.clubId,
       away_club_id: ctx.awayClubId,
