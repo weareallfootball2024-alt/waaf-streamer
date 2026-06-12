@@ -15,6 +15,8 @@ export type StandaloneMatchContext = {
   clubLogoUri: string;
   teamHome: string;
   teamAway: string;
+  awayClubId?: number;
+  awayLogoUri?: string;
 };
 
 export function buildStandaloneMatch(ctx: StandaloneMatchContext) {
@@ -63,9 +65,11 @@ export async function createStandaloneLiveMatch(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       club_id: ctx.clubId,
+      away_club_id: ctx.awayClubId,
       team_home: ctx.teamHome,
       team_away: ctx.teamAway,
       club_logo_url: ctx.clubLogoUri || undefined,
+      away_logo_url: ctx.awayLogoUri || undefined,
     }),
   });
   const data = await res.json();

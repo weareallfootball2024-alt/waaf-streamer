@@ -18,11 +18,11 @@ import {
 } from 'react-native';
 
 import { WaafLivestreamView, type WaafLivestreamViewRef } from 'waaf-livestream';
-import * as ImagePicker from 'expo-image-picker';
 import * as ScreenOrientation from 'expo-screen-orientation';
 
 import { API_URL } from '../../constants/api';
 import { parseOperatorToken } from '../../constants/streamPlatforms';
+import { StandaloneMatchSetupScreen } from '../../components/StandaloneMatchSetupScreen';
 import { StreamSettingsScreen } from '../../components/StreamSettingsScreen';
 import {
   fetchTournamentMatches,
@@ -37,8 +37,6 @@ import {
 } from '../../services/streamConfig';
 import {
   createStandaloneLiveMatch,
-  searchPublicClubs,
-  type PublicClub,
   type StandaloneMatchContext,
 } from '../../services/standaloneMatch';
 import { buildRtmpEndpoint, maskRtmpEndpoint, validateRtmpSettings } from '../../services/rtmpEndpoint';
@@ -200,177 +198,6 @@ function MatchSelectionScreen({ matches, onSelect, onBack, tokenMode = false }) 
                     </TouchableOpacity>
                 )}
             />
-        </SafeAreaView>
-    );
-}
-
-// ==================================================
-// ЭКРАН: МАТЧ ВНЕ ТУРНИРА — ВЫБОР КЛУБА
-// ==================================================
-function StandaloneClubScreen({ onStart, onBack, onOpenSettings }) {
-    const [search, setSearch] = useState('');
-    const [clubs, setClubs] = useState<PublicClub[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [manualMode, setManualMode] = useState(false);
-    const [manualName, setManualName] = useState('');
-    const [manualLogoUri, setManualLogoUri] = useState<string | null>(null);
-    const [opponent, setOpponent] = useState('Соперник');
-    const [selectedClub, setSelectedClub] = useState<PublicClub | null>(null);
-
-    const runSearch = async () => {
-        if (!search.trim()) return;
-        setLoading(true);
-        try {
-            setClubs(await searchPublicClubs(search));
-            setManualMode(false);
-            setSelectedClub(null);
-        } catch (e) {
-            Alert.alert('Ошибка', e instanceof Error ? e.message : 'Поиск не удался');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const pickLogo = async () => {
-        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (!perm.granted) {
-            Alert.alert('Нужен доступ к галерее');
-            return;
-        }
-        const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ['images'],
-            allowsEditing: true,
-            aspect: [1, 1],
-            quality: 0.85,
-        });
-        if (!result.canceled && result.assets[0]?.uri) {
-            setManualLogoUri(result.assets[0].uri);
-        }
-    };
-
-    const startFromClub = (club: PublicClub) => {
-        const ctx: StandaloneMatchContext = {
-            standalone: true,
-            clubId: club.id,
-            clubName: club.name,
-            clubLogoUri: club.logo_url || '',
-            teamHome: club.name,
-            teamAway: opponent.trim() || 'Соперник',
-        };
-        onStart(ctx);
-    };
-
-    const startManual = () => {
-        const name = manualName.trim();
-        if (!name) {
-            Alert.alert('Ошибка', 'Введите название клуба');
-            return;
-        }
-        const ctx: StandaloneMatchContext = {
-            standalone: true,
-            clubName: name,
-            clubLogoUri: manualLogoUri || '',
-            teamHome: name,
-            teamAway: opponent.trim() || 'Соперник',
-        };
-        onStart(ctx);
-    };
-
-    return (
-        <SafeAreaView style={styles.listContainer}>
-            <View style={styles.listHeader}>
-                <TouchableOpacity onPress={onBack} style={styles.backBtnSmall}>
-                    <Text style={{ color: 'white', fontWeight: 'bold' }}>НАЗАД</Text>
-                </TouchableOpacity>
-                <Text style={styles.titleSmall}>ВНЕ ТУРНИРА</Text>
-                <TouchableOpacity onPress={onOpenSettings}>
-                    <Text style={{ color: '#4cd964', fontWeight: 'bold', fontSize: 12 }}>⚙</Text>
-                </TouchableOpacity>
-            </View>
-            <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
-                <Text style={styles.subTitle}>Найдите клуб в системе WAAF</Text>
-                <TextInput
-                    style={styles.inputBig}
-                    placeholder="Название клуба"
-                    placeholderTextColor="#666"
-                    value={search}
-                    onChangeText={setSearch}
-                    onSubmitEditing={runSearch}
-                />
-                <TouchableOpacity style={styles.btnPrimary} onPress={runSearch} disabled={loading}>
-                    {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>НАЙТИ</Text>}
-                </TouchableOpacity>
-
-                {clubs.map((club) => (
-                    <TouchableOpacity
-                        key={club.id}
-                        style={[styles.matchCard, selectedClub?.id === club.id && { borderColor: '#4cd964', borderWidth: 2 }]}
-                        onPress={() => setSelectedClub(club)}
-                    >
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            {club.logo_url ? (
-                                <Image source={{ uri: club.logo_url }} style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10 }} />
-                            ) : (
-                                <View style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10, backgroundColor: '#333' }} />
-                            )}
-                            <View style={{ flex: 1 }}>
-                                <Text style={styles.teamTitle}>{club.name}</Text>
-                                {club.city ? <Text style={{ color: '#888', fontSize: 12 }}>{club.city}</Text> : null}
-                            </View>
-                        </View>
-                    </TouchableOpacity>
-                ))}
-
-                {selectedClub && (
-                    <>
-                        <Text style={[styles.subTitle, { marginTop: 16 }]}>Соперник (необязательно)</Text>
-                        <TextInput
-                            style={styles.inputBig}
-                            placeholder="Соперник"
-                            placeholderTextColor="#666"
-                            value={opponent}
-                            onChangeText={setOpponent}
-                        />
-                        <TouchableOpacity style={styles.btnPrimary} onPress={() => startFromClub(selectedClub)}>
-                            <Text style={styles.btnText}>К СТРИМУ</Text>
-                        </TouchableOpacity>
-                    </>
-                )}
-
-                <TouchableOpacity onPress={() => setManualMode(!manualMode)} style={{ marginTop: 24 }}>
-                    <Text style={{ color: '#888', textAlign: 'center' }}>
-                        {manualMode ? '▲ Скрыть ручной ввод' : '▼ Моего клуба нет в списке'}
-                    </Text>
-                </TouchableOpacity>
-
-                {manualMode && (
-                    <View style={{ marginTop: 12 }}>
-                        <TextInput
-                            style={styles.inputBig}
-                            placeholder="Название клуба"
-                            placeholderTextColor="#666"
-                            value={manualName}
-                            onChangeText={setManualName}
-                        />
-                        <TextInput
-                            style={styles.inputBig}
-                            placeholder="Соперник"
-                            placeholderTextColor="#666"
-                            value={opponent}
-                            onChangeText={setOpponent}
-                        />
-                        <TouchableOpacity style={[styles.btnPrimary, { backgroundColor: '#444' }]} onPress={pickLogo}>
-                            <Text style={styles.btnText}>{manualLogoUri ? 'СМЕНИТЬ ЛОГО' : 'ДОБАВИТЬ ЛОГО'}</Text>
-                        </TouchableOpacity>
-                        {manualLogoUri ? (
-                            <Image source={{ uri: manualLogoUri }} style={{ width: 72, height: 72, borderRadius: 36, alignSelf: 'center', marginVertical: 12 }} />
-                        ) : null}
-                        <TouchableOpacity style={styles.btnPrimary} onPress={startManual}>
-                            <Text style={styles.btnText}>К СТРИМУ</Text>
-                        </TouchableOpacity>
-                    </View>
-                )}
-            </ScrollView>
         </SafeAreaView>
     );
 }
@@ -575,7 +402,7 @@ export default function App() {
   }
   if (currentScreen === 'step_standalone_club') {
       return (
-          <StandaloneClubScreen
+          <StandaloneMatchSetupScreen
               onStart={startStandaloneMatch}
               onBack={handleBackToStart}
               onOpenSettings={() => openSettings('step_standalone_club')}
@@ -617,6 +444,7 @@ export default function App() {
               sessionToken={matchSessionToken}
               operatorToken={operatorToken}
               onOpenSettings={() => openSettings('control')}
+              isStandaloneSession={isStandaloneSession}
           />
       );
   }
@@ -701,7 +529,7 @@ function RosterEditScreen({ match, allPlayers, onSave, onBack, accessCode = null
 // ==================================================
 // MATCH CONTROL SCREEN (ГОЛЫ + АССИСТЕНТЫ + JAVA ЗВУК)
 // ==================================================
-function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, sessionToken = null, operatorToken = null, onOpenSettings }) {
+function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, sessionToken = null, operatorToken = null, onOpenSettings, isStandaloneSession = false }) {
   const videoRef = useRef<WaafLivestreamViewRef>(null);
   const [vkShareUrl, setVkShareUrl] = useState('');
   const isStandalone = !!match.standalone;
@@ -937,6 +765,13 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             }
             const endpoint = buildRtmpEndpoint(rtmp.rtmpUrl, rtmp.streamKey);
             console.log('[stream] RTMP →', maskRtmpEndpoint(endpoint), 'muted=', isMuted);
+            if (isMuted) {
+              Alert.alert(
+                'Микрофон выключен',
+                'В эфир уходит тишина — VK требует аудиодорожку. Звук с трибун не передаётся.',
+                [{ text: 'Понятно' }],
+              );
+            }
             await videoRef.current?.startStreaming(rtmp.streamKey, rtmp.rtmpUrl, isMuted);
             waitingConnection = true;
         } catch (e: any) {
@@ -962,6 +797,10 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   };
 
   const toggleMic = () => {
+      if (isStreaming) {
+        Alert.alert('Микрофон', 'Переключить микрофон можно только до начала эфира');
+        return;
+      }
       const newState = !isMuted;
       setIsMuted(newState);
       videoRef.current?.setMuted(newState).catch(() => {});
@@ -1291,7 +1130,12 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                 onDisconnect={() => {
                   setIsStreaming(false);
                   setIsLoading(false);
-                  Alert.alert('Эфир прерван', 'Соединение с VK RTMP разорвано');
+                  Alert.alert(
+                    'Эфир прерван',
+                    isMuted
+                      ? 'Соединение с VK разорвано. Попробуйте включить микрофон перед эфиром или обновить RTMP-ключ в VK Studio.'
+                      : 'Соединение с VK RTMP разорвано. Проверьте интернет и ключ в VK Studio.',
+                  );
                 }}
             />
           ) : ( 
@@ -1303,7 +1147,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       <SafeAreaView style={styles.overlay}>
         
       <View style={styles.header}>
-            <TouchableOpacity onPress={() => { if(isStreaming) { videoRef.current?.stopStreaming(); setIsStreaming(false); } onBack(); }} style={styles.backButton}><Text style={styles.backText}>К РАСПИСАНИЮ</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => { if(isStreaming) { videoRef.current?.stopStreaming(); setIsStreaming(false); } onBack(); }} style={styles.backButton}><Text style={styles.backText}>{isStandaloneSession ? 'ВЫХОД' : 'К РАСПИСАНИЮ'}</Text></TouchableOpacity>
             <TouchableOpacity onPress={handleUndo} style={styles.undoButton}><Text style={styles.undoText}>↩ ОТМЕНА</Text></TouchableOpacity>
             <View style={styles.timerBox}><Text style={styles.timerText}>{formatTimer(displaySeconds)}</Text><Text style={styles.periodText}>{period === 0 ? 'Разминка' : period === 1 ? '1-й Тайм' : period === 2 ? 'Перерыв' : period === 3 ? '2-й Тайм' : period === 4 ? 'Перерыв (ДВ)' : period === 5 ? 'Доп. время 1' : period === 6 ? 'Доп. время 2' : period === 7 ? '⚽ Пенальти' : 'Завершён'}</Text></View>
             <View style={styles.headerInfo}><Text style={styles.matchTitle}>{match.team_home} vs {match.team_away}</Text></View>
