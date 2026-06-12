@@ -41,6 +41,7 @@ import {
   type PublicClub,
   type StandaloneMatchContext,
 } from '../../services/standaloneMatch';
+import { buildRtmpEndpoint, maskRtmpEndpoint, validateRtmpSettings } from '../../services/rtmpEndpoint';
 import { formatTimer, getActualSeconds } from '../../utils/matchTimer';
 import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
@@ -929,9 +930,15 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                 return;
             }
 
-            await videoRef.current?.startStreaming(rtmp.streamKey, rtmp.rtmpUrl);
+            const rtmpError = validateRtmpSettings(rtmp.rtmpUrl, rtmp.streamKey);
+            if (rtmpError) {
+              Alert.alert('Настройки RTMP', rtmpError);
+              return;
+            }
+            const endpoint = buildRtmpEndpoint(rtmp.rtmpUrl, rtmp.streamKey);
+            console.log('[stream] RTMP →', maskRtmpEndpoint(endpoint), 'muted=', isMuted);
+            await videoRef.current?.startStreaming(rtmp.streamKey, rtmp.rtmpUrl, isMuted);
             waitingConnection = true;
-            await videoRef.current?.setMuted(isMuted);
         } catch (e: any) {
             console.error(e);
             setIsStreaming(false);
@@ -947,8 +954,10 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     setIsStreaming(true);
     sendUpdate({ status: 'live' });
     Alert.alert(
-      'Вы в эфире',
-      vkShareUrl ? `Трансляция VK:\n${vkShareUrl}` : 'Эфир в VK запущен со счётом в кадре',
+      'RTMP подключён',
+      vkShareUrl
+        ? `Поток ушёл на сервер VK.\n\nПроверьте эфир в VK Studio или по ссылке:\n${vkShareUrl}\n\nЕсли эфира нет — обновите ключ в Studio → Ключи и виджеты.`
+        : 'Поток ушёл на сервер VK. Проверьте эфир в VK Studio.',
     );
   };
 
@@ -1269,9 +1278,21 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                   setIsLoading(false);
                   setIsStreaming(false);
                   const code = e?.nativeEvent?.code ?? e?.code ?? 'unknown';
-                  Alert.alert('Ошибка подключения', `Код: ${code}`);
+                  const lower = code.toLowerCase();
+                  const hint = code === 'auth_error'
+                    ? 'Неверный RTMP URL или ключ. Скопируйте заново из VK Studio → Ключи и виджеты.'
+                    : code === 'encoder_prepare_failed'
+                    ? 'Камера/микрофон не готовы. Перезапустите экран матча.'
+                    : lower.includes('broken pipe')
+                    ? 'VK разорвал соединение при отправке видео.\n\n• Сбросьте ключ в VK Studio и вставьте заново\n• URL: rtmp://…/input/ или rtmps://pub.live.vkvideo.ru/app/\n• Ключ — отдельным полем, без vk.com\n• Попробуйте включить микрофон перед эфиром'
+                    : `Ошибка: ${code}`;
+                  Alert.alert('VK: не удалось подключиться', hint);
                 }}
-                onDisconnect={() => { setIsStreaming(false); setIsLoading(false); }}
+                onDisconnect={() => {
+                  setIsStreaming(false);
+                  setIsLoading(false);
+                  Alert.alert('Эфир прерван', 'Соединение с VK RTMP разорвано');
+                }}
             />
           ) : ( 
             <View style={{flex: 1, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center'}}>

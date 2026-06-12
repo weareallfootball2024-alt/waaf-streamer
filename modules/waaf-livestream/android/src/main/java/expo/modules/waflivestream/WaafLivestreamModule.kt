@@ -14,8 +14,8 @@ class WaafLivestreamModule : Module() {
         view.setCameraFacing(camera)
       }
 
-      AsyncFunction("startStreaming") { view: WaafLivestreamView, streamKey: String, rtmpUrl: String ->
-        view.startStreaming(rtmpUrl, streamKey)
+      AsyncFunction("startStreaming") { view: WaafLivestreamView, streamKey: String, rtmpUrl: String, muted: Boolean? ->
+        view.startStreaming(rtmpUrl, streamKey, muted ?: false)
       }
 
       AsyncFunction("stopStreaming") { view: WaafLivestreamView ->

@@ -359,7 +359,7 @@ export function StreamSettingsScreen({ onClose }: Props) {
                 {vk.streamTarget === 'wall' && (
                   <>
                     <Text style={styles.hint}>
-                      VK Studio → Ключи и виджеты. Постоянный ключ — сохраняется один раз.
+                      VK Studio → Ключи и виджеты. Вставьте «URL сервера» и «Ключ» отдельно (не страницу vk.com). Если эфир не идёт — сбросьте ключ в Studio и обновите здесь.
                     </Text>
                     <TextInput
                       style={styles.input}

@@ -2,6 +2,9 @@ package expo.modules.waflivestream
 
 import android.content.Context
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.widget.FrameLayout
@@ -36,30 +39,42 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   private var scoreAway = 0
   private var timerText = "00:00"
   private var periodText = ""
+  private val mainHandler = Handler(Looper.getMainLooper())
+  private var pendingEndpoint: String? = null
+  private val publishRunnable = Runnable { publishStream() }
+  private val scoreboardRunnable = Runnable { ensureScoreboardFilter() }
 
   private val connectChecker = object : ConnectChecker {
-    override fun onConnectionStarted(url: String) {}
+    override fun onConnectionStarted(url: String) {
+      Log.i(TAG, "RTMP connecting: ${maskEndpoint(url)}")
+    }
 
     override fun onConnectionSuccess() {
+      Log.i(TAG, "RTMP connected, sending frames")
       post { onConnectionSuccess(mapOf()) }
     }
 
     override fun onConnectionFailed(reason: String) {
+      Log.e(TAG, "RTMP failed: $reason")
       post {
-        genericStream.stopStream()
+        if (genericStream.isStreaming) genericStream.stopStream()
         onConnectionFailed(mapOf("code" to reason))
       }
     }
 
-    override fun onNewBitrate(bitrate: Long) {}
+    override fun onNewBitrate(bitrate: Long) {
+      Log.d(TAG, "bitrate=$bitrate sent=${genericStream.getStreamClient().getSentVideoFrames()}")
+    }
 
     override fun onDisconnect() {
-      post { onDisconnect(mapOf()) }
+      Log.w(TAG, "RTMP disconnected")
+      post { onDisconnect(mapOf("code" to "disconnected")) }
     }
 
     override fun onAuthError() {
+      Log.e(TAG, "RTMP auth error")
       post {
-        genericStream.stopStream()
+        if (genericStream.isStreaming) genericStream.stopStream()
         onConnectionFailed(mapOf("code" to "auth_error"))
       }
     }
@@ -74,7 +89,12 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     MicrophoneSource(),
   ).apply {
     getGlInterface().autoHandleOrientation = true
-    getStreamClient().setReTries(5)
+    getStreamClient().apply {
+      setReTries(3)
+      setDelay(500)
+      forceIncrementalTs(true)
+      setWriteChunkSize(4096)
+    }
   }
 
   init {
@@ -86,13 +106,12 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
 
     surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
       override fun surfaceCreated(holder: SurfaceHolder) {
-        if (!scoreboardReady) {
-          setupScoreboardFilter()
-          scoreboardReady = true
-        }
         if (!genericStream.isOnPreview) {
+          if (!isPrepared) prepareEncoder()
           genericStream.startPreview(surfaceView)
         }
+        mainHandler.removeCallbacks(scoreboardRunnable)
+        mainHandler.postDelayed(scoreboardRunnable, 600)
       }
 
       override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
@@ -100,33 +119,44 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
       }
 
       override fun surfaceDestroyed(holder: SurfaceHolder) {
+        mainHandler.removeCallbacks(publishRunnable)
+        mainHandler.removeCallbacks(scoreboardRunnable)
         if (genericStream.isOnPreview) {
           genericStream.stopPreview()
         }
       }
     })
-
-    prepareEncoder()
   }
 
   private fun prepareEncoder() {
     isPrepared = try {
-      genericStream.prepareVideo(1280, 720, 2_000_000, 30, 2, 0)
-        && genericStream.prepareAudio(44100, true, 128_000)
-    } catch (_: IllegalArgumentException) {
+      // 720p, как в api.video; iFrameInterval=2 с, rotation=0
+      genericStream.prepareVideo(1280, 720, 1_500_000, 30, 2, 0)
+        && genericStream.prepareAudio(44_100, true, 128_000)
+    } catch (e: IllegalArgumentException) {
+      Log.e(TAG, "prepareEncoder failed", e)
       false
     }
+    if (isPrepared) {
+      Log.i(TAG, "encoder prepared 1280x720 @ 1.5Mbps")
+    }
+  }
+
+  private fun ensureScoreboardFilter() {
+    if (scoreboardReady) return
+    setupScoreboardFilter()
+    scoreboardReady = true
   }
 
   private fun setupScoreboardFilter() {
     val filter = ImageObjectFilterRender()
     scoreboardFilter = filter
+    genericStream.getGlInterface().setFilter(filter)
     filter.setImage(
       ScoreboardRenderer.render(teamHome, teamAway, scoreHome, scoreAway, timerText, periodText),
     )
-    filter.setPosition(TranslateTo.TOP)
     filter.setScale(100f, 12f)
-    genericStream.getGlInterface().setFilter(filter)
+    filter.setPosition(TranslateTo.TOP)
   }
 
   private fun refreshScoreboardBitmap() {
@@ -142,7 +172,10 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     }
   }
 
-  fun startStreaming(rtmpUrl: String, streamKey: String) {
+  fun startStreaming(rtmpUrl: String, streamKey: String, muted: Boolean) {
+    isMuted = muted
+    mainHandler.removeCallbacks(publishRunnable)
+
     if (!isPrepared) {
       prepareEncoder()
       if (!isPrepared) {
@@ -150,14 +183,54 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
         return
       }
     }
+
+    if (!scoreboardReady && genericStream.isOnPreview) {
+      ensureScoreboardFilter()
+    }
+
+    val endpoint = buildRtmpEndpoint(rtmpUrl, streamKey)
+    if (endpoint.isBlank()) {
+      onConnectionFailed(mapOf("code" to "empty_rtmp_endpoint"))
+      return
+    }
+    if (!endpoint.startsWith("rtmp", ignoreCase = true)) {
+      onConnectionFailed(mapOf("code" to "invalid_rtmp_scheme"))
+      return
+    }
+
+    pendingEndpoint = endpoint
+    Log.i(TAG, "Start stream → ${maskEndpoint(endpoint)} muted=$muted")
+
+    // Не менять audio source во время connect — только флаг до startStream
+    genericStream.getStreamClient().setOnlyVideo(muted)
+
+    val delayMs = if (genericStream.isOnPreview) 800L else 1500L
     if (!genericStream.isOnPreview) {
       genericStream.startPreview(surfaceView)
     }
-    val endpoint = buildRtmpEndpoint(rtmpUrl, streamKey)
-    genericStream.startStream(endpoint)
+    mainHandler.postDelayed(publishRunnable, delayMs)
+  }
+
+  private fun publishStream() {
+    val url = pendingEndpoint ?: return
+    if (genericStream.isStreaming) return
+    if (!genericStream.isOnPreview) {
+      Log.w(TAG, "preview not ready, retry publish")
+      mainHandler.postDelayed(publishRunnable, 500)
+      return
+    }
+    try {
+      Log.i(TAG, "publishStream now")
+      genericStream.startStream(url)
+    } catch (e: Exception) {
+      Log.e(TAG, "startStream exception", e)
+      onConnectionFailed(mapOf("code" to (e.message ?: "start_exception")))
+    }
   }
 
   fun stopStreaming() {
+    mainHandler.removeCallbacks(publishRunnable)
+    pendingEndpoint = null
     if (genericStream.isStreaming) {
       genericStream.stopStream()
     }
@@ -165,13 +238,19 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
 
   fun setMuted(muted: Boolean) {
     isMuted = muted
+    if (genericStream.isStreaming) {
+      // Смена источника во время эфира рвёт RTMP (Broken pipe)
+      Log.w(TAG, "setMuted ignored while streaming")
+      return
+    }
     try {
       if (muted) {
         genericStream.changeAudioSource(NoAudioSource())
       } else {
         genericStream.changeAudioSource(MicrophoneSource())
       }
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+      Log.e(TAG, "setMuted failed", e)
     }
   }
 
@@ -186,6 +265,8 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   }
 
   override fun onDetachedFromWindow() {
+    mainHandler.removeCallbacks(publishRunnable)
+    mainHandler.removeCallbacks(scoreboardRunnable)
     if (genericStream.isStreaming) {
       genericStream.stopStream()
     }
@@ -197,12 +278,27 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   }
 
   companion object {
+    private const val TAG = "WaafLivestream"
+
     fun buildRtmpEndpoint(rtmpUrl: String, streamKey: String): String {
-      val base = rtmpUrl.trim().trimEnd('/')
+      var base = rtmpUrl.trim().trimEnd('/')
       val key = streamKey.trim()
-      if (base.isEmpty() || key.isEmpty()) return base
-      if (base.endsWith(key)) return base
+      if (base.isEmpty()) return ""
+      // Убрать ключ из URL, если пользователь вставил полную строку в оба поля
+      if (key.isNotEmpty() && base.endsWith(key)) {
+        base = base.removeSuffix("/$key").removeSuffix(key).trimEnd('/')
+      }
+      if (key.isEmpty()) return base
+      if (base.contains("/$key")) return base
       return "$base/$key"
+    }
+
+    private fun maskEndpoint(endpoint: String): String {
+      val idx = endpoint.lastIndexOf('/')
+      if (idx < 0 || idx >= endpoint.length - 1) return endpoint
+      val streamKey = endpoint.substring(idx + 1)
+      val masked = if (streamKey.length <= 8) "***" else "${streamKey.take(4)}…${streamKey.takeLast(4)}"
+      return endpoint.substring(0, idx + 1) + masked
     }
   }
 }

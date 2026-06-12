@@ -17,7 +17,7 @@ export type WaafLivestreamViewProps = ViewProps & {
 };
 
 export type WaafLivestreamViewRef = {
-  startStreaming: (streamKey: string, rtmpUrl: string) => Promise<void>;
+  startStreaming: (streamKey: string, rtmpUrl: string, muted?: boolean) => Promise<void>;
   stopStreaming: () => Promise<void>;
   setMuted: (muted: boolean) => Promise<void>;
   updateScoreboard: (payload: ScoreboardPayload) => Promise<void>;
