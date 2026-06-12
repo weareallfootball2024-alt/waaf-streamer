@@ -1,6 +1,7 @@
 package expo.modules.waflivestream
 
 import android.content.Context
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -25,6 +26,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   val onConnectionSuccess by EventDispatcher()
   val onConnectionFailed by EventDispatcher()
   val onDisconnect by EventDispatcher()
+  val onStreamStats by EventDispatcher()
 
   private val surfaceView = SurfaceView(context)
   private val microphoneSource = MicrophoneSource()
@@ -32,7 +34,6 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   private var isPrepared = false
   private var isMuted = false
   private var scoreboardReady = false
-  private var streamConnected = false
 
   private var teamHome = "Хозяева"
   private var teamAway = "Гости"
@@ -43,9 +44,25 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   private val mainHandler = Handler(Looper.getMainLooper())
   private var pendingEndpoint: String? = null
   private val publishRunnable = Runnable { publishStream() }
-  private val deferredFilterRunnable = Runnable {
-    if (!scoreboardReady) {
-      ensureScoreboardFilter()
+  private val deferredFilterRunnable = Runnable { ensureScoreboardFilter() }
+  private val statsRunnable = object : Runnable {
+    override fun run() {
+      if (!genericStream.isStreaming) return
+      val client = genericStream.getStreamClient()
+      val videoFrames = client.getSentVideoFrames()
+      val audioFrames = client.getSentAudioFrames()
+      val bytes = client.getBytesSend()
+      post {
+        onStreamStats(
+          mapOf(
+            "videoFrames" to videoFrames,
+            "audioFrames" to audioFrames,
+            "bytesSent" to bytes,
+          ),
+        )
+      }
+      Log.i(TAG, "stats video=$videoFrames audio=$audioFrames bytes=$bytes")
+      mainHandler.postDelayed(this, 3000)
     }
   }
 
@@ -55,15 +72,15 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     }
 
     override fun onConnectionSuccess() {
-      Log.i(TAG, "RTMP connected, sending frames")
-      streamConnected = true
-      mainHandler.postDelayed(deferredFilterRunnable, 400)
+      Log.i(TAG, "RTMP publish started")
+      mainHandler.postDelayed(deferredFilterRunnable, 1500)
+      mainHandler.postDelayed(statsRunnable, 2000)
       post { onConnectionSuccess(mapOf()) }
     }
 
     override fun onConnectionFailed(reason: String) {
       Log.e(TAG, "RTMP failed: $reason")
-      streamConnected = false
+      stopStats()
       post {
         if (genericStream.isStreaming) genericStream.stopStream()
         onConnectionFailed(mapOf("code" to reason))
@@ -71,22 +88,18 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     }
 
     override fun onNewBitrate(bitrate: Long) {
-      val client = genericStream.getStreamClient()
-      Log.d(
-        TAG,
-        "bitrate=$bitrate video=${client.getSentVideoFrames()} audio=${client.getSentAudioFrames()} muted=$isMuted",
-      )
+      Log.d(TAG, "bitrate=$bitrate")
     }
 
     override fun onDisconnect() {
       Log.w(TAG, "RTMP disconnected")
-      streamConnected = false
+      stopStats()
       post { onDisconnect(mapOf("code" to "disconnected")) }
     }
 
     override fun onAuthError() {
       Log.e(TAG, "RTMP auth error")
-      streamConnected = false
+      stopStats()
       post {
         if (genericStream.isStreaming) genericStream.stopStream()
         onConnectionFailed(mapOf("code" to "auth_error"))
@@ -105,8 +118,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     getGlInterface().autoHandleOrientation = true
     getStreamClient().apply {
       setReTries(3)
-      setDelay(500)
-      forceIncrementalTs(true)
+      setDelay(300)
       setWriteChunkSize(4096)
     }
   }
@@ -133,6 +145,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
       override fun surfaceDestroyed(holder: SurfaceHolder) {
         mainHandler.removeCallbacks(publishRunnable)
         mainHandler.removeCallbacks(deferredFilterRunnable)
+        stopStats()
         if (genericStream.isOnPreview) {
           genericStream.stopPreview()
         }
@@ -140,34 +153,40 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     })
   }
 
+  private fun videoRotation(): Int {
+    val o = context.resources.configuration.orientation
+    return if (o == Configuration.ORIENTATION_LANDSCAPE) 90 else 0
+  }
+
   private fun prepareEncoder() {
+    val rotation = videoRotation()
     isPrepared = try {
-      genericStream.prepareVideo(1280, 720, 1_500_000, 30, 1, 0)
+      genericStream.prepareVideo(1280, 720, 1_500_000, 30, 1, rotation)
         && genericStream.prepareAudio(44_100, true, 128_000)
     } catch (e: IllegalArgumentException) {
       Log.e(TAG, "prepareEncoder failed", e)
       false
     }
     if (isPrepared) {
-      Log.i(TAG, "encoder prepared 1280x720 @ 1.5Mbps GOP=1s")
+      Log.i(TAG, "encoder prepared 1280x720 rotation=$rotation")
     }
   }
 
-  /** Mute через MicrophoneSource — AAC-дорожка остаётся, можно переключать в эфире. */
   private fun setMicrophoneMuted(muted: Boolean) {
     isMuted = muted
     try {
       if (muted) microphoneSource.mute() else microphoneSource.unMute()
-      Log.i(TAG, "microphone muted=$muted (streaming=${genericStream.isStreaming})")
+      Log.i(TAG, "microphone muted=$muted")
     } catch (e: Exception) {
       Log.e(TAG, "setMicrophoneMuted failed", e)
     }
   }
 
   private fun ensureScoreboardFilter() {
-    if (scoreboardReady) return
+    if (scoreboardReady || !genericStream.isStreaming) return
     setupScoreboardFilter()
     scoreboardReady = true
+    Log.i(TAG, "scoreboard filter applied")
   }
 
   private fun setupScoreboardFilter() {
@@ -188,6 +207,10 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     )
   }
 
+  private fun stopStats() {
+    mainHandler.removeCallbacks(statsRunnable)
+  }
+
   fun setCameraFacing(camera: String) {
     if (camera == "front") {
       (genericStream.videoSource as? Camera2Source)?.switchCamera()
@@ -195,9 +218,11 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   }
 
   fun startStreaming(rtmpUrl: String, streamKey: String, muted: Boolean) {
-    streamConnected = false
     mainHandler.removeCallbacks(publishRunnable)
     mainHandler.removeCallbacks(deferredFilterRunnable)
+    stopStats()
+    scoreboardReady = false
+    scoreboardFilter = null
 
     if (!isPrepared) {
       prepareEncoder()
@@ -222,7 +247,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     pendingEndpoint = endpoint
     Log.i(TAG, "Start stream → ${maskEndpoint(endpoint)} muted=$muted")
 
-    val delayMs = if (genericStream.isOnPreview) 800L else 1500L
+    val delayMs = if (genericStream.isOnPreview) 1200L else 2000L
     if (!genericStream.isOnPreview) {
       genericStream.startPreview(surfaceView)
     }
@@ -237,11 +262,8 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
       mainHandler.postDelayed(publishRunnable, 500)
       return
     }
-    if (!scoreboardReady && !streamConnected) {
-      ensureScoreboardFilter()
-    }
     try {
-      Log.i(TAG, "publishStream now")
+      Log.i(TAG, "publishStream (no filter yet)")
       genericStream.startStream(url)
     } catch (e: Exception) {
       Log.e(TAG, "startStream exception", e)
@@ -252,10 +274,15 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   fun stopStreaming() {
     mainHandler.removeCallbacks(publishRunnable)
     mainHandler.removeCallbacks(deferredFilterRunnable)
+    stopStats()
     pendingEndpoint = null
-    streamConnected = false
+    scoreboardReady = false
     if (genericStream.isStreaming) {
       genericStream.stopStream()
+    }
+    try {
+      genericStream.getGlInterface().clearFilters()
+    } catch (_: Exception) {
     }
   }
 
@@ -276,6 +303,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   override fun onDetachedFromWindow() {
     mainHandler.removeCallbacks(publishRunnable)
     mainHandler.removeCallbacks(deferredFilterRunnable)
+    stopStats()
     if (genericStream.isStreaming) {
       genericStream.stopStream()
     }

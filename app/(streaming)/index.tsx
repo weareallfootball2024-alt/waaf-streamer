@@ -531,7 +531,10 @@ function RosterEditScreen({ match, allPlayers, onSave, onBack, accessCode = null
 // ==================================================
 function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, sessionToken = null, operatorToken = null, onOpenSettings, isStandaloneSession = false }) {
   const videoRef = useRef<WaafLivestreamViewRef>(null);
+  const streamStatsRef = useRef({ videoFrames: 0 });
+  const streamHealthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [vkShareUrl, setVkShareUrl] = useState('');
+  const [streamHealth, setStreamHealth] = useState('');
   const isStandalone = !!match.standalone;
   const opAuth = { sessionToken, accessCode, operatorToken };
   const opFetch = (path, options = {}) => operatorFetch(path, opAuth, options);
@@ -781,12 +784,31 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     setIsLoading(false);
     setIsStreaming(true);
     sendUpdate({ status: 'live' });
+    streamStatsRef.current.videoFrames = 0;
+    if (streamHealthTimerRef.current) clearTimeout(streamHealthTimerRef.current);
+    streamHealthTimerRef.current = setTimeout(() => {
+      if (streamStatsRef.current.videoFrames < 10) {
+        Alert.alert(
+          'Видео не уходит',
+          'RTMP подключён, но кадры почти не отправляются.\n\n• Проверьте разрешение камеры\n• Остановите и запустите эфир снова\n• Если не помогло — напишите в поддержку WAAF',
+        );
+      }
+    }, 8000);
     Alert.alert(
       'RTMP подключён',
-      vkShareUrl
-        ? `Поток ушёл на сервер VK.\n\nПроверьте эфир в VK Studio или по ссылке:\n${vkShareUrl}\n\nЕсли эфира нет — обновите ключ в Studio → Ключи и виджеты.`
-        : 'Поток ушёл на сервер VK. Проверьте эфир в VK Studio.',
+      `Сервер VK принял поток.\n\nЭфир сначала виден в VK Studio (studio.vk.com), не сразу на стене сообщества.\n\n1. Studio → Трансляции → «Входящий сигнал»\n2. При необходимости нажмите «В эфир»\n3. Стена обновится через 1–2 мин${vkShareUrl ? `\n\nСсылка: ${vkShareUrl}` : ''}\n\nНет сигнала в Studio? Сбросьте ключ в «Ключи и виджеты».`,
     );
+  };
+
+  const handleStreamStats = (e: {
+    nativeEvent?: { videoFrames?: number; audioFrames?: number; bytesSent?: number };
+    videoFrames?: number;
+    audioFrames?: number;
+  }) => {
+    const videoFrames = e?.nativeEvent?.videoFrames ?? e?.videoFrames ?? 0;
+    const audioFrames = e?.nativeEvent?.audioFrames ?? e?.audioFrames ?? 0;
+    streamStatsRef.current.videoFrames = videoFrames;
+    setStreamHealth(`VK: ${videoFrames} кадр. · ${audioFrames} аудио`);
   };
 
   const toggleMic = () => {
@@ -1116,9 +1138,12 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                     : `Ошибка: ${code}`;
                   Alert.alert('VK: не удалось подключиться', hint);
                 }}
+                onStreamStats={handleStreamStats}
                 onDisconnect={() => {
                   setIsStreaming(false);
                   setIsLoading(false);
+                  setStreamHealth('');
+                  if (streamHealthTimerRef.current) clearTimeout(streamHealthTimerRef.current);
                   Alert.alert(
                     'Эфир прерван',
                     'Соединение с VK RTMP разорвано. Проверьте интернет и ключ в VK Studio.',
@@ -1139,12 +1164,15 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             <View style={styles.timerBox}><Text style={styles.timerText}>{formatTimer(displaySeconds)}</Text><Text style={styles.periodText}>{period === 0 ? 'Разминка' : period === 1 ? '1-й Тайм' : period === 2 ? 'Перерыв' : period === 3 ? '2-й Тайм' : period === 4 ? 'Перерыв (ДВ)' : period === 5 ? 'Доп. время 1' : period === 6 ? 'Доп. время 2' : period === 7 ? '⚽ Пенальти' : 'Завершён'}</Text></View>
             <View style={styles.headerInfo}><Text style={styles.matchTitle}>{match.team_home} vs {match.team_away}</Text></View>
         </View>
+        {isStreaming && streamHealth ? (
+            <Text style={styles.streamHealthText}>{streamHealth}</Text>
+        ) : null}
         {isStreaming && vkShareUrl ? (
             <TouchableOpacity
               style={styles.waafLinkRow}
               onPress={() => Share.share({ message: vkShareUrl, title: 'VK трансляция' })}
             >
-              <Text style={styles.waafLinkText}>VK: поделиться ссылкой</Text>
+              <Text style={styles.waafLinkText}>VK: поделиться ссылкой · Studio</Text>
             </TouchableOpacity>
         ) : null}
 
@@ -1380,6 +1408,7 @@ const styles = StyleSheet.create({
   matchTitle: { color: 'white', fontWeight: 'bold', fontSize: 16 },
   waafLinkRow: { alignSelf: 'center', marginTop: 4, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(26,67,132,0.85)', borderRadius: 8 },
   waafLinkText: { color: '#a8d4ff', fontSize: 12, fontWeight: '600' },
+  streamHealthText: { alignSelf: 'center', marginTop: 4, color: '#8f8', fontSize: 11, fontWeight: '600' },
   timerBox: { alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 25, paddingVertical: 5, borderRadius: 12, borderWidth: 1, borderColor: '#e31e24' },
   timerText: { color: 'white', fontSize: 28, fontWeight: '900', fontVariant: ['tabular-nums'] },
   periodText: { color: '#e31e24', fontSize: 10, fontWeight: 'bold', textTransform: 'uppercase' },

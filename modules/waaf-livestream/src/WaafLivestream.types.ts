@@ -14,6 +14,9 @@ export type WaafLivestreamViewProps = ViewProps & {
   onConnectionSuccess?: () => void;
   onConnectionFailed?: (event: { nativeEvent: { code: string } }) => void;
   onDisconnect?: () => void;
+  onStreamStats?: (event: {
+    nativeEvent: { videoFrames: number; audioFrames: number; bytesSent: number };
+  }) => void;
 };
 
 export type WaafLivestreamViewRef = {

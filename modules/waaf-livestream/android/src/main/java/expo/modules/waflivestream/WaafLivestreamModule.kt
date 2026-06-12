@@ -8,7 +8,7 @@ class WaafLivestreamModule : Module() {
     Name("WaafLivestream")
 
     View(WaafLivestreamView::class) {
-      Events("onConnectionSuccess", "onConnectionFailed", "onDisconnect")
+      Events("onConnectionSuccess", "onConnectionFailed", "onDisconnect", "onStreamStats")
 
       Prop("camera") { view: WaafLivestreamView, camera: String ->
         view.setCameraFacing(camera)
