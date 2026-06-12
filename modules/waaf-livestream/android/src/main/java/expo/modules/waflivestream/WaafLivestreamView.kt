@@ -12,7 +12,6 @@ import androidx.annotation.RequiresApi
 import com.pedro.common.ConnectChecker
 import com.pedro.encoder.input.gl.render.filters.`object`.ImageObjectFilterRender
 import com.pedro.encoder.input.sources.audio.MicrophoneSource
-import com.pedro.encoder.input.sources.audio.SilenceAudioSource
 import com.pedro.encoder.input.sources.video.Camera2Source
 import com.pedro.encoder.utils.gl.TranslateTo
 import com.pedro.library.generic.GenericStream
@@ -28,6 +27,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   val onDisconnect by EventDispatcher()
 
   private val surfaceView = SurfaceView(context)
+  private val microphoneSource = MicrophoneSource()
   private var scoreboardFilter: ImageObjectFilterRender? = null
   private var isPrepared = false
   private var isMuted = false
@@ -43,7 +43,6 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   private val mainHandler = Handler(Looper.getMainLooper())
   private var pendingEndpoint: String? = null
   private val publishRunnable = Runnable { publishStream() }
-  private val scoreboardRunnable = Runnable { ensureScoreboardFilter() }
   private val deferredFilterRunnable = Runnable {
     if (!scoreboardReady) {
       ensureScoreboardFilter()
@@ -75,7 +74,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
       val client = genericStream.getStreamClient()
       Log.d(
         TAG,
-        "bitrate=$bitrate video=${client.getSentVideoFrames()} audio=${client.getSentAudioFrames()}",
+        "bitrate=$bitrate video=${client.getSentVideoFrames()} audio=${client.getSentAudioFrames()} muted=$isMuted",
       )
     }
 
@@ -101,7 +100,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     context,
     connectChecker,
     Camera2Source(context),
-    MicrophoneSource(),
+    microphoneSource,
   ).apply {
     getGlInterface().autoHandleOrientation = true
     getStreamClient().apply {
@@ -133,7 +132,6 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
 
       override fun surfaceDestroyed(holder: SurfaceHolder) {
         mainHandler.removeCallbacks(publishRunnable)
-        mainHandler.removeCallbacks(scoreboardRunnable)
         mainHandler.removeCallbacks(deferredFilterRunnable)
         if (genericStream.isOnPreview) {
           genericStream.stopPreview()
@@ -155,13 +153,14 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     }
   }
 
-  private fun applyAudioSource(muted: Boolean) {
+  /** Mute через MicrophoneSource — AAC-дорожка остаётся, можно переключать в эфире. */
+  private fun setMicrophoneMuted(muted: Boolean) {
+    isMuted = muted
     try {
-      val source = if (muted) SilenceAudioSource() else MicrophoneSource()
-      genericStream.changeAudioSource(source)
-      Log.i(TAG, "audio source: ${if (muted) "silence" else "microphone"}")
+      if (muted) microphoneSource.mute() else microphoneSource.unMute()
+      Log.i(TAG, "microphone muted=$muted (streaming=${genericStream.isStreaming})")
     } catch (e: Exception) {
-      Log.e(TAG, "applyAudioSource failed", e)
+      Log.e(TAG, "setMicrophoneMuted failed", e)
     }
   }
 
@@ -178,7 +177,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     filter.setImage(
       ScoreboardRenderer.render(teamHome, teamAway, scoreHome, scoreAway, timerText, periodText),
     )
-    filter.setScale(100f, 12f)
+    filter.setScale(96f, 19f)
     filter.setPosition(TranslateTo.TOP)
   }
 
@@ -196,7 +195,6 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   }
 
   fun startStreaming(rtmpUrl: String, streamKey: String, muted: Boolean) {
-    isMuted = muted
     streamConnected = false
     mainHandler.removeCallbacks(publishRunnable)
     mainHandler.removeCallbacks(deferredFilterRunnable)
@@ -209,7 +207,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
       }
     }
 
-    applyAudioSource(muted)
+    setMicrophoneMuted(muted)
 
     val endpoint = buildRtmpEndpoint(rtmpUrl, streamKey)
     if (endpoint.isBlank()) {
@@ -262,12 +260,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   }
 
   fun setMuted(muted: Boolean) {
-    isMuted = muted
-    if (genericStream.isStreaming) {
-      Log.w(TAG, "setMuted ignored while streaming")
-      return
-    }
-    applyAudioSource(muted)
+    setMicrophoneMuted(muted)
   }
 
   fun updateScoreboard(payload: Map<String, Any?>) {
@@ -282,7 +275,6 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
 
   override fun onDetachedFromWindow() {
     mainHandler.removeCallbacks(publishRunnable)
-    mainHandler.removeCallbacks(scoreboardRunnable)
     mainHandler.removeCallbacks(deferredFilterRunnable)
     if (genericStream.isStreaming) {
       genericStream.stopStream()

@@ -765,13 +765,6 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             }
             const endpoint = buildRtmpEndpoint(rtmp.rtmpUrl, rtmp.streamKey);
             console.log('[stream] RTMP →', maskRtmpEndpoint(endpoint), 'muted=', isMuted);
-            if (isMuted) {
-              Alert.alert(
-                'Микрофон выключен',
-                'В эфир уходит тишина — VK требует аудиодорожку. Звук с трибун не передаётся.',
-                [{ text: 'Понятно' }],
-              );
-            }
             await videoRef.current?.startStreaming(rtmp.streamKey, rtmp.rtmpUrl, isMuted);
             waitingConnection = true;
         } catch (e: any) {
@@ -797,10 +790,6 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   };
 
   const toggleMic = () => {
-      if (isStreaming) {
-        Alert.alert('Микрофон', 'Переключить микрофон можно только до начала эфира');
-        return;
-      }
       const newState = !isMuted;
       setIsMuted(newState);
       videoRef.current?.setMuted(newState).catch(() => {});
@@ -1132,9 +1121,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                   setIsLoading(false);
                   Alert.alert(
                     'Эфир прерван',
-                    isMuted
-                      ? 'Соединение с VK разорвано. Попробуйте включить микрофон перед эфиром или обновить RTMP-ключ в VK Studio.'
-                      : 'Соединение с VK RTMP разорвано. Проверьте интернет и ключ в VK Studio.',
+                    'Соединение с VK RTMP разорвано. Проверьте интернет и ключ в VK Studio.',
                   );
                 }}
             />
