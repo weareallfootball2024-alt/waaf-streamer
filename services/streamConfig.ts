@@ -37,6 +37,7 @@ export async function loadStreamSettings(): Promise<StreamSettings> {
       ...DEFAULT_STREAM_SETTINGS,
       ...parsed,
       streamQuality: normalizeStreamQuality(parsed.streamQuality),
+      adClips: Array.isArray(parsed.adClips) ? parsed.adClips.slice(0, 3) : [],
       vk: normalizeVkConfig(parsed.vk),
       youtube: { ...DEFAULT_STREAM_SETTINGS.youtube, ...parsed.youtube },
       rutube: { ...DEFAULT_STREAM_SETTINGS.rutube, ...parsed.rutube },

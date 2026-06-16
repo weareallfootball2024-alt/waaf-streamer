@@ -34,9 +34,16 @@ export type VkPlatformConfig = PlatformConfig & {
   albumTitle?: string;
 };
 
+export type AdClipPreset = {
+  id: string;
+  title: string;
+  uri: string;
+};
+
 export type StreamSettings = {
   activePlatform: StreamPlatform;
   streamQuality: StreamQuality;
+  adClips: AdClipPreset[];
   vk: VkPlatformConfig;
   youtube: PlatformConfig;
   rutube: PlatformConfig;
@@ -62,6 +69,7 @@ const emptyPlatform = (enabled: boolean): PlatformConfig => ({
 export const DEFAULT_STREAM_SETTINGS: StreamSettings = {
   activePlatform: 'vk',
   streamQuality: 'auto',
+  adClips: [],
   vk: {
     ...emptyPlatform(true),
     streamTarget: 'wall',

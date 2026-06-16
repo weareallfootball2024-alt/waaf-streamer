@@ -20,6 +20,8 @@ export type EventBannerPayload = {
 
 export type ResolvedStreamQuality = 'high' | 'medium' | 'low';
 
+export type VideoInsertKind = 'ad' | 'replay';
+
 export type WaafLivestreamViewProps = ViewProps & {
   camera?: 'front' | 'back';
   streamQuality?: ResolvedStreamQuality;
@@ -29,6 +31,12 @@ export type WaafLivestreamViewProps = ViewProps & {
   onStreamStats?: (event: {
     nativeEvent: { videoFrames: number; audioFrames: number; bytesSent: number };
   }) => void;
+  onVideoInsertStarted?: (event: {
+    nativeEvent: { kind: VideoInsertKind; loop: boolean };
+  }) => void;
+  onVideoInsertEnded?: (event: { nativeEvent: { kind: VideoInsertKind } }) => void;
+  onVideoInsertError?: (event: { nativeEvent: { code: string } }) => void;
+  onReplaySaved?: (event: { nativeEvent: { uri: string } }) => void;
 };
 
 export type WaafLivestreamViewRef = {
@@ -42,4 +50,7 @@ export type WaafLivestreamViewRef = {
   setMuted: (muted: boolean) => Promise<void>;
   updateScoreboard: (payload: ScoreboardPayload) => Promise<void>;
   showEventBanner: (payload: EventBannerPayload) => Promise<void>;
+  playVideoInsert: (filePath: string, loop?: boolean) => Promise<void>;
+  stopVideoInsert: () => Promise<void>;
+  triggerReplay: (seconds?: number) => Promise<void>;
 };

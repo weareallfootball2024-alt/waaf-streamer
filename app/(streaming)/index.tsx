@@ -25,6 +25,8 @@ import { parseOperatorToken } from '../../constants/streamPlatforms';
 import { StandaloneMatchSetupScreen } from '../../components/StandaloneMatchSetupScreen';
 import { StandalonePayScreen } from '../../components/StandalonePayScreen';
 import { StreamSettingsScreen } from '../../components/StreamSettingsScreen';
+import { VideoInsertSheet, pickVideoFromLibrary } from '../../components/VideoInsertSheet';
+import type { AdClipPreset } from '../../constants/streamPlatforms';
 import {
   fetchTournamentMatches,
   operatorFetch,
@@ -616,6 +618,11 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   const [streamHealth, setStreamHealth] = useState('');
   const [encoderQuality, setEncoderQuality] = useState<ResolvedStreamQuality>('medium');
   const streamQualitySettingRef = useRef<StreamQuality>('auto');
+  const [adClips, setAdClips] = useState<AdClipPreset[]>([]);
+  const [showInsertSheet, setShowInsertSheet] = useState(false);
+  const [videoInsertActive, setVideoInsertActive] = useState(false);
+  const [videoInsertLoop, setVideoInsertLoop] = useState(false);
+  const [replayLoading, setReplayLoading] = useState(false);
   const isStandalone = !!match.standalone;
   const opAuth = { sessionToken, accessCode, operatorToken };
   const opFetch = (path, options = {}) => operatorFetch(path, opAuth, options);
@@ -754,6 +761,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       streamQualitySettingRef.current = settings.streamQuality;
       const resolved = await resolveEncoderQuality(settings.streamQuality);
       setEncoderQuality(resolved);
+      setAdClips(settings.adClips || []);
     });
   }, []);
 
@@ -925,6 +933,37 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       const newState = !isMuted;
       setIsMuted(newState);
       videoRef.current?.setMuted(newState).catch(() => {});
+  };
+
+  const handlePlayVideoInsert = async (uri: string, loop: boolean) => {
+    try {
+      await videoRef.current?.playVideoInsert(uri, loop);
+    } catch (e: unknown) {
+      Alert.alert('Ролик', e instanceof Error ? e.message : 'Не удалось вставить ролик');
+    }
+  };
+
+  const handlePickAndPlayVideo = async () => {
+    setShowInsertSheet(false);
+    const uri = await pickVideoFromLibrary();
+    if (!uri) return;
+    const loop = videoInsertLoop;
+    await handlePlayVideoInsert(uri, loop);
+  };
+
+  const handleStopVideoInsert = () => {
+    videoRef.current?.stopVideoInsert().catch(() => {});
+  };
+
+  const handleTriggerReplay = async () => {
+    if (replayLoading || videoInsertActive) return;
+    setReplayLoading(true);
+    try {
+      await videoRef.current?.triggerReplay(10);
+    } catch {
+      setReplayLoading(false);
+      Alert.alert('Реплей', 'Не удалось сохранить последние 10 секунд');
+    }
   };
 
   const handleTimerAction = (action: string) => {
@@ -1266,6 +1305,36 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                   Alert.alert('VK: не удалось подключиться', hint);
                 }}
                 onStreamStats={handleStreamStats}
+                onVideoInsertStarted={(e) => {
+                  const loop = e?.nativeEvent?.loop ?? false;
+                  setVideoInsertActive(true);
+                  setVideoInsertLoop(loop);
+                  setReplayLoading(false);
+                }}
+                onVideoInsertEnded={() => {
+                  setVideoInsertActive(false);
+                  setVideoInsertLoop(false);
+                  setReplayLoading(false);
+                }}
+                onVideoInsertError={(e) => {
+                  setVideoInsertActive(false);
+                  setVideoInsertLoop(false);
+                  setReplayLoading(false);
+                  const code = e?.nativeEvent?.code ?? 'unknown';
+                  const hint = code === 'not_streaming'
+                    ? 'Сначала запустите эфир'
+                    : code === 'insert_active'
+                    ? 'Уже идёт вставка видео'
+                    : code === 'replay_buffer_empty'
+                    ? 'Подождите несколько секунд после старта эфира'
+                    : code === 'replay_export_failed'
+                    ? 'Не удалось собрать клип реплея'
+                    : `Ошибка: ${code}`;
+                  Alert.alert(code.startsWith('replay') ? 'Реплей' : 'Видео', hint);
+                }}
+                onReplaySaved={() => {
+                  setReplayLoading(false);
+                }}
                 onDisconnect={() => {
                   setIsStreaming(false);
                   setIsLoading(false);
@@ -1301,6 +1370,12 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
               onPress={() => Share.share({ message: vkShareUrl, title: 'VK трансляция' })}
             >
               <Text style={styles.waafLinkText}>VK: поделиться ссылкой · Studio</Text>
+            </TouchableOpacity>
+        ) : null}
+
+        {videoInsertActive && videoInsertLoop ? (
+            <TouchableOpacity style={styles.returnLiveBtn} onPress={handleStopVideoInsert}>
+              <Text style={styles.returnLiveText}>К МАТЧУ — вернуть камеру</Text>
             </TouchableOpacity>
         ) : null}
 
@@ -1422,6 +1497,24 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                     <TouchableOpacity style={styles.btnMicSettings} onPress={onOpenSettings}>
                         <Text style={styles.btnMicText}>⚙</Text>
                     </TouchableOpacity>
+                    {canStream && isStreaming && (
+                    <>
+                    <TouchableOpacity
+                      style={[styles.btnInsert, videoInsertActive && { opacity: 0.5 }]}
+                      onPress={() => setShowInsertSheet(true)}
+                      disabled={videoInsertActive}
+                    >
+                        <Text style={styles.btnInsertText}>РОЛИК</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.btnInsert, (videoInsertActive || replayLoading) && { opacity: 0.5 }]}
+                      onPress={handleTriggerReplay}
+                      disabled={videoInsertActive || replayLoading}
+                    >
+                        <Text style={styles.btnInsertText}>{replayLoading ? '…' : 'РЕПЛЕЙ'}</Text>
+                    </TouchableOpacity>
+                    </>
+                    )}
                     {canStream && (
                     <>
                     <TouchableOpacity style={[styles.btnMic, isMuted && styles.btnMicOff]} onPress={toggleMic}>
@@ -1478,6 +1571,17 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
               {eventStep === 3 && (<><Text style={styles.modalTitle}>КТО ОТДАЛ?</Text><TouchableOpacity style={[styles.modalListBtn, {backgroundColor: '#555', marginBottom: 15}]} onPress={() => confirmEvent(tempScorer, null)}><Text style={styles.modalListBtnText}>🚫 БЕЗ АССИСТЕНТА</Text></TouchableOpacity><FlatList data={filteredPlayers} keyExtractor={item => item.id.toString()} style={{maxHeight: 200, width: '100%'}} renderItem={({item}) => (<TouchableOpacity style={styles.playerRow} onPress={() => confirmEvent(tempScorer, item)}><View style={[styles.playerNumBadge, {backgroundColor: '#e31e24'}]}><Text style={styles.playerNumText}>{item.number}</Text></View><Text style={styles.playerName}>{item.name}</Text></TouchableOpacity>)} /><TouchableOpacity style={styles.closeBtn} onPress={() => setEventStep(2)}><Text style={{color: 'gray'}}>Назад</Text></TouchableOpacity></>)}
             </View></View>
         </Modal>
+
+        <VideoInsertSheet
+          visible={showInsertSheet}
+          presets={adClips}
+          onClose={() => setShowInsertSheet(false)}
+          onPlay={(uri, loop) => {
+            setVideoInsertLoop(loop);
+            handlePlayVideoInsert(uri, loop);
+          }}
+          onPickFile={handlePickAndPlayVideo}
+        />
 
       </SafeAreaView>
     </View>
@@ -1597,6 +1701,24 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#4a90e2',
   },
+  btnInsert: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: 1,
+    borderColor: '#888',
+  },
+  btnInsertText: { color: '#fff', fontWeight: 'bold', fontSize: 11 },
+  returnLiveBtn: {
+    alignSelf: 'center',
+    backgroundColor: '#e31e24',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginBottom: 6,
+  },
+  returnLiveText: { color: '#fff', fontWeight: 'bold', fontSize: 13 },
   btnMicOff: {
     backgroundColor: '#e31e24', 
     borderColor: 'red',

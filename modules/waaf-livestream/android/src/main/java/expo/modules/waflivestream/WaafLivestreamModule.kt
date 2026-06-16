@@ -8,7 +8,16 @@ class WaafLivestreamModule : Module() {
     Name("WaafLivestream")
 
     View(WaafLivestreamView::class) {
-      Events("onConnectionSuccess", "onConnectionFailed", "onDisconnect", "onStreamStats")
+      Events(
+        "onConnectionSuccess",
+        "onConnectionFailed",
+        "onDisconnect",
+        "onStreamStats",
+        "onVideoInsertStarted",
+        "onVideoInsertEnded",
+        "onVideoInsertError",
+        "onReplaySaved",
+      )
 
       Prop("camera") { view: WaafLivestreamView, camera: String ->
         view.setCameraFacing(camera)
@@ -43,6 +52,18 @@ class WaafLivestreamModule : Module() {
           assistantNumber = payload["assistantNumber"]?.toString(),
           durationMs = (payload["durationMs"] as? Number)?.toLong() ?: 6000L,
         )
+      }
+
+      AsyncFunction("playVideoInsert") { view: WaafLivestreamView, filePath: String, loop: Boolean? ->
+        view.playVideoInsert(filePath, loop ?: false)
+      }
+
+      AsyncFunction("stopVideoInsert") { view: WaafLivestreamView ->
+        view.stopVideoInsert()
+      }
+
+      AsyncFunction("triggerReplay") { view: WaafLivestreamView, seconds: Int? ->
+        view.triggerReplay(seconds ?: 10)
       }
     }
   }

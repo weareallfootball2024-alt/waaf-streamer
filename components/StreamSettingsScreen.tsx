@@ -1,3 +1,4 @@
+import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -21,7 +22,9 @@ import {
   StreamQuality,
   StreamSettings,
   VkStreamTarget,
+  type AdClipPreset,
 } from '../constants/streamPlatforms';
+import { copyAdClipToStorage, MAX_CLIPS, newAdClipId, trimAdClips } from '../services/adClips';
 import { clearSession, getUser, login, restoreSession, saveSession } from '../services/authSession';
 import { linkWaafAccount } from '../services/streamApi';
 import { loadStreamSettings, saveStreamSettings } from '../services/streamConfig';
@@ -275,6 +278,48 @@ export function StreamSettingsScreen({ onClose }: Props) {
     Alert.alert('Готово', 'RTMP применён для текущего эфира');
   };
 
+  const addAdClip = async () => {
+    if (settings.adClips.length >= MAX_CLIPS) {
+      Alert.alert('Ролики', `Максимум ${MAX_CLIPS} пресета`);
+      return;
+    }
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Доступ', 'Нужен доступ к файлам на телефоне');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['videos'],
+      quality: 1,
+    });
+    if (result.canceled || !result.assets?.[0]?.uri) return;
+    try {
+      const id = newAdClipId();
+      const uri = await copyAdClipToStorage(result.assets[0].uri, id);
+      const title = `Ролик ${settings.adClips.length + 1}`;
+      setSettings((prev) => ({
+        ...prev,
+        adClips: trimAdClips([...prev.adClips, { id, title, uri }]),
+      }));
+    } catch {
+      Alert.alert('Ошибка', 'Не удалось сохранить ролик');
+    }
+  };
+
+  const removeAdClip = (id: string) => {
+    setSettings((prev) => ({
+      ...prev,
+      adClips: prev.adClips.filter((c) => c.id !== id),
+    }));
+  };
+
+  const renameAdClip = (id: string, title: string) => {
+    setSettings((prev) => ({
+      ...prev,
+      adClips: prev.adClips.map((c) => (c.id === id ? { ...c, title } : c)),
+    }));
+  };
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -318,6 +363,31 @@ export function StreamSettingsScreen({ onClose }: Props) {
           })}
         </View>
         <Text style={styles.hint}>{STREAM_QUALITY_HINTS[settings.streamQuality]}</Text>
+
+        <Text style={styles.sectionTitle}>Ролики для эфира</Text>
+        <View style={styles.block}>
+          <Text style={styles.hint}>
+            MP4 H.264 — для перерывов и рекламы. До {MAX_CLIPS} пресетов. Лучше 720p.
+          </Text>
+          {settings.adClips.map((clip: AdClipPreset) => (
+            <View key={clip.id} style={styles.adClipRow}>
+              <TextInput
+                style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                value={clip.title}
+                onChangeText={(t) => renameAdClip(clip.id, t)}
+                placeholderTextColor="#666"
+              />
+              <TouchableOpacity onPress={() => removeAdClip(clip.id)} style={styles.adClipRemove}>
+                <Text style={styles.linkOut}>✕</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+          {settings.adClips.length < MAX_CLIPS && (
+            <TouchableOpacity style={styles.btnApply} onPress={addAdClip}>
+              <Text style={styles.btnApplyText}>+ ДОБАВИТЬ РОЛИК</Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
         <Text style={styles.sectionTitle}>Аккаунт для оплаты эфира</Text>
         <View style={styles.block}>
@@ -681,4 +751,6 @@ const styles = StyleSheet.create({
   groupPhoto: { width: 36, height: 36, borderRadius: 18, marginRight: 10 },
   groupPhotoPlaceholder: { width: 36, height: 36, borderRadius: 18, marginRight: 10, backgroundColor: '#444' },
   groupName: { color: '#fff', fontSize: 14, flex: 1 },
+  adClipRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  adClipRemove: { padding: 8 },
 });

@@ -19,6 +19,8 @@ import com.pedro.library.generic.GenericStream
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
+import java.io.File
+import java.util.concurrent.Executors
 
 @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
 class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(context, appContext) {
@@ -27,9 +29,14 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   val onConnectionFailed by EventDispatcher()
   val onDisconnect by EventDispatcher()
   val onStreamStats by EventDispatcher()
+  val onVideoInsertStarted by EventDispatcher()
+  val onVideoInsertEnded by EventDispatcher()
+  val onVideoInsertError by EventDispatcher()
+  val onReplaySaved by EventDispatcher()
 
   private val surfaceView = SurfaceView(context)
   private val microphoneSource = MicrophoneSource()
+  private var camera2Source = Camera2Source(context)
   private var scoreboardFilter: ImageObjectFilterRender? = null
   private var eventFilter: ImageObjectFilterRender? = null
   private var eventFilterAdded = false
@@ -113,21 +120,65 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     override fun onAuthSuccess() {}
   }
 
-  private val genericStream: GenericStream = GenericStream(
-    context,
-    connectChecker,
-    Camera2Source(context),
-    microphoneSource,
-  ).apply {
-    getGlInterface().autoHandleOrientation = true
-    getStreamClient().apply {
-      setReTries(3)
-      setDelay(0)
-      setWriteChunkSize(4096)
-    }
-  }
+  private lateinit var genericStream: GenericStream
+  private lateinit var videoInjector: VideoInjector
+  private val replayRingBuffer = ReplayRingBuffer()
+  private val replayExecutor = Executors.newSingleThreadExecutor()
 
   init {
+    genericStream = GenericStream(
+      context,
+      connectChecker,
+      camera2Source,
+      microphoneSource,
+    ).apply {
+      setRecordController(ReplayCaptureRecordController(replayRingBuffer))
+      getGlInterface().autoHandleOrientation = true
+      getStreamClient().apply {
+        setReTries(3)
+        setDelay(0)
+        setWriteChunkSize(4096)
+      }
+    }
+
+    videoInjector = VideoInjector(
+      context,
+      genericStream,
+      microphoneSource,
+      mainHandler,
+      object : VideoInjector.Callbacks {
+        override fun onInsertStarted(kind: String, loop: Boolean) {
+          post { onVideoInsertStarted(mapOf("kind" to kind, "loop" to loop)) }
+        }
+
+        override fun onInsertEnded(kind: String) {
+          post { onVideoInsertEnded(mapOf("kind" to kind)) }
+        }
+
+        override fun onInsertError(code: String) {
+          post { onVideoInsertError(mapOf("code" to code)) }
+        }
+
+        override fun hideGlFilters() = hideGlFiltersForInsert()
+
+        override fun scheduleScoreboardRestore() {
+          scoreboardReady = false
+          if (genericStream.isStreaming) {
+            mainHandler.postDelayed(deferredFilterRunnable, 400)
+          }
+        }
+
+        override fun isMicMuted(): Boolean = isMuted
+
+        override fun setMicMuted(muted: Boolean) = setMicrophoneMuted(muted)
+
+        override fun createCameraSource(): Camera2Source {
+          camera2Source = Camera2Source(context)
+          return camera2Source
+        }
+      },
+    )
+
     layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
     addView(
       surfaceView,
@@ -155,6 +206,65 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
         }
       }
     })
+  }
+
+  private fun hideGlFiltersForInsert() {
+    hideEventBanner()
+    try {
+      genericStream.getGlInterface().clearFilters()
+    } catch (_: Exception) {
+    }
+    scoreboardFilter = null
+    scoreboardReady = false
+  }
+
+  fun playVideoInsert(filePath: String, loop: Boolean) {
+    videoInjector.play(filePath, loop, "ad")
+  }
+
+  fun stopVideoInsert() {
+    videoInjector.stop()
+  }
+
+  fun isVideoInsertActive(): Boolean = videoInjector.isActive
+
+  fun triggerReplay(seconds: Int) {
+    if (!genericStream.isStreaming) {
+      post { onVideoInsertError(mapOf("code" to "not_streaming")) }
+      return
+    }
+    if (videoInjector.isActive) {
+      post { onVideoInsertError(mapOf("code" to "insert_active")) }
+      return
+    }
+
+    val clipSeconds = seconds.coerceIn(1, 15)
+    replayExecutor.execute {
+      try {
+        val snapshot = replayRingBuffer.snapshot()
+        if (snapshot.videoFrames.isEmpty()) {
+          mainHandler.post { onVideoInsertError(mapOf("code" to "replay_buffer_empty")) }
+          return@execute
+        }
+
+        val file = File(context.cacheDir, "replay_${System.currentTimeMillis()}.mp4")
+        val ok = ReplayExporter.exportLastSeconds(snapshot, clipSeconds, file.absolutePath)
+        if (!ok) {
+          mainHandler.post { onVideoInsertError(mapOf("code" to "replay_export_failed")) }
+          return@execute
+        }
+
+        mainHandler.post {
+          post { onReplaySaved(mapOf("uri" to file.absolutePath)) }
+          videoInjector.play(file.absolutePath, false, "replay")
+        }
+      } catch (e: Exception) {
+        Log.e(TAG, "triggerReplay failed", e)
+        mainHandler.post {
+          onVideoInsertError(mapOf("code" to (e.message ?: "replay_failed")))
+        }
+      }
+    }
   }
 
   private fun videoRotation(): Int {
@@ -302,11 +412,15 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   }
 
   fun stopStreaming() {
+    if (videoInjector.isActive) {
+      videoInjector.stop()
+    }
     mainHandler.removeCallbacks(publishRunnable)
     mainHandler.removeCallbacks(deferredFilterRunnable)
     stopStats()
     pendingEndpoint = null
     scoreboardReady = false
+    replayRingBuffer.clear()
     if (genericStream.isStreaming) {
       genericStream.stopStream()
     }
@@ -378,6 +492,11 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   }
 
   override fun onDetachedFromWindow() {
+    if (videoInjector.isActive) {
+      videoInjector.stop()
+    }
+    replayExecutor.shutdownNow()
+    replayRingBuffer.clear()
     mainHandler.removeCallbacks(publishRunnable)
     mainHandler.removeCallbacks(deferredFilterRunnable)
     stopStats()
