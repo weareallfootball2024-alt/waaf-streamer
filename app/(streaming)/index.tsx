@@ -53,7 +53,6 @@ import {
 import { buildRtmpEndpoint, maskRtmpEndpoint, validateRtmpSettings } from '../../services/rtmpEndpoint';
 import { formatTimer, getActualSeconds } from '../../utils/matchTimer';
 import * as Linking from 'expo-linking';
-import { router } from 'expo-router';
 
 function getPeriodLabel(period: number): string {
   if (period === 0) return 'Разминка';
@@ -70,7 +69,7 @@ function getPeriodLabel(period: number): string {
 // ==================================================
 // ЭКРАН 1: ВВОД ID ТУРНИРА
 // ==================================================
-function TournamentLoginScreen({ onNext, onOpenSettings, onStandalone, initialToken = '', onBackToModules }) {
+function TournamentLoginScreen({ onNext, onOpenSettings, onStandalone, initialToken = '' }) {
     const [tokenInput, setTokenInput] = useState(initialToken);
     const [tournId, setTournId] = useState('');
     const [loading, setLoading] = useState(false);
@@ -128,11 +127,6 @@ function TournamentLoginScreen({ onNext, onOpenSettings, onStandalone, initialTo
             <TouchableOpacity style={styles.exitBtnPos} onPress={handleExit}>
                 <Text style={styles.exitBtnText}>🚪 ВЫХОД</Text>
             </TouchableOpacity>
-            {onBackToModules && (
-            <TouchableOpacity style={styles.modulesBtnPos} onPress={onBackToModules}>
-                <Text style={styles.modulesBtnText}>◀ РЕЖИМЫ</Text>
-            </TouchableOpacity>
-            )}
             <TouchableOpacity style={styles.privacyBtnPos} onPress={openPrivacy}>
                 <Text style={styles.privacyBtnText}>🔒 ПОЛИТИКА</Text>
             </TouchableOpacity>
@@ -481,7 +475,6 @@ export default function App() {
               onStandalone={handleStandalonePress}
               onOpenSettings={() => openSettings('step1_tourn')}
               initialToken={pendingLinkToken}
-              onBackToModules={() => router.replace('/')}
           />
       );
   }
