@@ -281,7 +281,6 @@ export default function App() {
   const [foundMatches, setFoundMatches] = useState([]);
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [matchRoster, setMatchRoster] = useState([]); 
-  const [allPlayers, setAllPlayers] = useState([]);  
   const [activeTournId, setActiveTournId] = useState(null);
   const [operatorToken, setOperatorToken] = useState<string | null>(null);
   const [pendingLinkToken, setPendingLinkToken] = useState('');
@@ -296,8 +295,6 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchAllPlayers();
-
     const handleUrl = (url: string | null) => {
       if (!url) return;
       const parsed = Linking.parse(url);
@@ -311,12 +308,44 @@ export default function App() {
     return () => sub.remove();
   }, []);
 
-  const fetchAllPlayers = async () => {
-    try {
-      const res = await fetch(`${API_URL}/api/players`);
-      const data = await res.json();
-      setAllPlayers(data);
-    } catch (e) {}
+  const buildRosterFromTeamPlayers = (homePlayers, awayPlayers, homeTeamId, awayTeamId) => [
+    ...homePlayers.map((p) => ({
+      id: p.id,
+      player_id: p.id,
+      name: p.name,
+      number: p.number,
+      team_id: homeTeamId,
+    })),
+    ...awayPlayers.map((p) => ({
+      id: p.id,
+      player_id: p.id,
+      name: p.name,
+      number: p.number,
+      team_id: awayTeamId,
+    })),
+  ];
+
+  const loadEffectiveMatchRoster = async (match) => {
+    const rosterRes = await fetch(`${API_URL}/api/match/${match.id}/roster`);
+    const savedRoster = await rosterRes.json();
+    if (Array.isArray(savedRoster) && savedRoster.length > 0) {
+      return savedRoster;
+    }
+    const homeTeamId = match.team_home_id;
+    const awayTeamId = match.team_away_id;
+    if (!homeTeamId || !awayTeamId) return [];
+    const [homeRes, awayRes] = await Promise.all([
+      fetch(`${API_URL}/api/match/${match.id}/team-players/${homeTeamId}`),
+      fetch(`${API_URL}/api/match/${match.id}/team-players/${awayTeamId}`),
+    ]);
+    const homePlayers = homeRes.ok ? await homeRes.json() : [];
+    const awayPlayers = awayRes.ok ? await awayRes.json() : [];
+    return buildRosterFromTeamPlayers(
+      Array.isArray(homePlayers) ? homePlayers : [],
+      Array.isArray(awayPlayers) ? awayPlayers : [],
+      homeTeamId,
+      awayTeamId,
+    );
   };
 
   const goToMatchList = (matches, tournId, token: string | null = null) => {
@@ -333,15 +362,14 @@ export default function App() {
       if (accessCode) setMatchAccessCode(accessCode);
       if (sessionToken) setMatchSessionToken(sessionToken);
       try {
-          const res = await fetch(`${API_URL}/api/match/${match.id}/roster`);
-          const roster = await res.json();
-          if (roster && roster.length > 0) {
-              setMatchRoster(roster);
+          const roster = await loadEffectiveMatchRoster(match);
+          setMatchRoster(roster);
+          if (roster.length > 0) {
               setCurrentScreen('control');
           } else {
               setCurrentScreen('roster');
           }
-      } catch (e) { Alert.alert("Ошибка протокола"); }
+      } catch (e) { Alert.alert("Ошибка загрузки состава"); }
   };
 
   const goToPin = (match) => {
@@ -499,7 +527,6 @@ export default function App() {
       return (
           <RosterEditScreen
               match={selectedMatch}
-              allPlayers={allPlayers}
               onSave={handleRosterSaved}
               onBack={() => setCurrentScreen('step2_list')}
               accessCode={matchAccessCode}
@@ -530,15 +557,37 @@ export default function App() {
 // ==================================================
 // ROSTER EDIT SCREEN
 // ==================================================
-function RosterEditScreen({ match, allPlayers, onSave, onBack, accessCode = null, sessionToken = null, operatorToken = null }) {
+function RosterEditScreen({ match, onSave, onBack, accessCode = null, sessionToken = null, operatorToken = null }) {
     const [activeTab, setActiveTab] = useState('home');
     const [selectedPlayers, setSelectedPlayers] = useState({});
     const [saving, setSaving] = useState(false);
+    const [teamPlayers, setTeamPlayers] = useState([]);
+    const [loadingPlayers, setLoadingPlayers] = useState(false);
     const opAuth = { sessionToken, accessCode, operatorToken };
 
     const currentTeamName = activeTab === 'home' ? match.team_home : match.team_away;
-    const normalize = (str) => str ? str.toString().trim().toLowerCase() : '';
-    const teamPlayers = allPlayers.filter(p => p.club && normalize(p.club) === normalize(currentTeamName));
+    const currentTeamId = activeTab === 'home' ? match.team_home_id : match.team_away_id;
+
+    useEffect(() => {
+        if (!match?.id || !currentTeamId) {
+            setTeamPlayers([]);
+            return;
+        }
+        let cancelled = false;
+        setLoadingPlayers(true);
+        fetch(`${API_URL}/api/match/${match.id}/team-players/${currentTeamId}`)
+            .then((res) => (res.ok ? res.json() : []))
+            .then((data) => {
+                if (!cancelled) setTeamPlayers(Array.isArray(data) ? data : []);
+            })
+            .catch(() => {
+                if (!cancelled) setTeamPlayers([]);
+            })
+            .finally(() => {
+                if (!cancelled) setLoadingPlayers(false);
+            });
+        return () => { cancelled = true; };
+    }, [match?.id, currentTeamId]);
 
     const togglePlayer = (player) => {
         setSelectedPlayers(prev => {
@@ -581,7 +630,10 @@ function RosterEditScreen({ match, allPlayers, onSave, onBack, accessCode = null
                 <TouchableOpacity style={[styles.tab, activeTab === 'away' && styles.activeTab]} onPress={() => setActiveTab('away')}><Text style={[styles.tabText, activeTab === 'away' && styles.activeTabText]}>{match.team_away}</Text></TouchableOpacity>
             </View>
             <ScrollView style={styles.playerList}>
-                {teamPlayers.length === 0 && <Text style={styles.emptyText}>Игроки клуба «{currentTeamName}» не найдены</Text>}
+                {loadingPlayers && <ActivityIndicator color="#4a90e2" style={{ marginVertical: 20 }} />}
+                {!loadingPlayers && teamPlayers.length === 0 && (
+                    <Text style={styles.emptyText}>Игроки команды «{currentTeamName}» не найдены</Text>
+                )}
                 {teamPlayers.map(player => {
                     const isSelected = !!selectedPlayers[player.id];
                     return (
