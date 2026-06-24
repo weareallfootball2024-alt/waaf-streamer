@@ -53,6 +53,17 @@ import {
 import { buildRtmpEndpoint, maskRtmpEndpoint, validateRtmpSettings } from '../../services/rtmpEndpoint';
 import { formatTimer, getActualSeconds } from '../../utils/matchTimer';
 import * as Linking from 'expo-linking';
+import {
+  AnonymousStreamScreen,
+  AuthChoiceScreen,
+  AuthenticatedHomeScreen,
+  MainHomeScreen,
+  WaafLoginScreen,
+} from '../../components/streaming/EntryScreens';
+import { createGuestLiveMatch } from '../../services/guestMatch';
+import { restoreSession } from '../../services/authSession';
+import { saveStreamSettings, loadStreamSettings } from '../../services/streamConfig';
+import type { TokenType } from '../../services/operatorFetch';
 
 function getPeriodLabel(period: number): string {
   if (period === 0) return 'Разминка';
@@ -271,22 +282,30 @@ function PinEntryScreen({ match, onSuccess, onBack }) {
 // ГЛАВНЫЙ КОМПОНЕНТ APP
 // ==================================================
 export default function App() {
-  const [currentScreen, setCurrentScreen] = useState('step1_tourn'); 
+  const [currentScreen, setCurrentScreen] = useState('home'); 
   const [foundMatches, setFoundMatches] = useState([]);
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [matchRoster, setMatchRoster] = useState([]); 
   const [activeTournId, setActiveTournId] = useState(null);
   const [operatorToken, setOperatorToken] = useState<string | null>(null);
+  const [tokenType, setTokenType] = useState<TokenType | null>(null);
+  const [isGuestFreemium, setIsGuestFreemium] = useState(false);
   const [pendingLinkToken, setPendingLinkToken] = useState('');
-  const [settingsReturnScreen, setSettingsReturnScreen] = useState('step1_tourn');
+  const [settingsReturnScreen, setSettingsReturnScreen] = useState('home');
   const [isStandaloneSession, setIsStandaloneSession] = useState(false);
   const [pendingStandaloneCtx, setPendingStandaloneCtx] = useState<StandaloneMatchContext | null>(null);
   const [standaloneAccess, setStandaloneAccess] = useState<StreamAccess | null>(null);
 
-  const openSettings = (returnTo = 'step1_tourn') => {
+  const openSettings = (returnTo = 'home') => {
       setSettingsReturnScreen(returnTo);
       setCurrentScreen('settings');
   };
+
+  useEffect(() => {
+    restoreSession().then((user) => {
+      if (user) setCurrentScreen('auth_home');
+    });
+  }, []);
 
   useEffect(() => {
     const handleUrl = (url: string | null) => {
@@ -342,11 +361,55 @@ export default function App() {
     );
   };
 
-  const goToMatchList = (matches, tournId, token: string | null = null) => {
+  const goToMatchList = (matches, tournId, token: string | null = null, resolvedTokenType: TokenType | null = null) => {
       setFoundMatches(matches);
       if (tournId) setActiveTournId(tournId);
       setOperatorToken(token);
+      setTokenType(resolvedTokenType);
+      setIsGuestFreemium(false);
       setCurrentScreen('step2_list');
+  };
+
+  const handleTokenResolved = async (tournamentId: string, token: string, resolvedTokenType: TokenType) => {
+      try {
+          const matches = await fetchTournamentMatches(tournamentId);
+          goToMatchList(matches, tournamentId, token, resolvedTokenType);
+      } catch (e) {
+          Alert.alert('Ошибка', e instanceof Error ? e.message : 'Не удалось загрузить матчи');
+      }
+  };
+
+  const startAnonymousStream = async (payload: {
+    rtmpUrl: string;
+    streamKey: string;
+    teamHome: string;
+    teamAway: string;
+  }) => {
+      try {
+          const settings = await loadStreamSettings();
+          settings.streamQuality = 'low';
+          settings.activePlatform = 'youtube';
+          settings.youtube = {
+              ...settings.youtube,
+              enabled: true,
+              rtmpUrl: payload.rtmpUrl,
+              streamKey: payload.streamKey,
+          };
+          await saveStreamSettings(settings);
+
+          const data = await createGuestLiveMatch(payload.teamHome, payload.teamAway);
+          setSelectedMatch({ ...data.match, guest: true, freemium: true });
+          setMatchRoster([]);
+          setIsGuestFreemium(true);
+          setIsStandaloneSession(false);
+          setOperatorToken(null);
+          setTokenType(null);
+          setMatchAccessCode(data.accessCode);
+          setMatchSessionToken(data.sessionToken);
+          setCurrentScreen('control');
+      } catch (e: unknown) {
+          Alert.alert('Ошибка', e instanceof Error ? e.message : 'Не удалось начать трансляцию');
+      }
   };
 
   const [matchAccessCode, setMatchAccessCode] = useState<string | null>(null);
@@ -386,9 +449,11 @@ export default function App() {
   };
 
   const handleBackToStart = () => {
-      setCurrentScreen('step1_tourn');
+      setCurrentScreen('home');
       setSelectedMatch(null);
       setOperatorToken(null);
+      setTokenType(null);
+      setIsGuestFreemium(false);
       setIsStandaloneSession(false);
   };
 
@@ -399,7 +464,7 @@ export default function App() {
               'Сначала настройте трансляцию',
               readiness.message,
               [
-                  { text: 'В настройки', onPress: () => openSettings('step1_tourn') },
+                  { text: 'В настройки', onPress: () => openSettings('auth_home') },
                   { text: 'Отмена', style: 'cancel' },
               ],
           );
@@ -468,6 +533,52 @@ export default function App() {
   if (currentScreen === 'settings') {
       return <StreamSettingsScreen onClose={() => setCurrentScreen(settingsReturnScreen)} />;
   }
+  if (currentScreen === 'home') {
+      return (
+          <MainHomeScreen
+              onAnonymous={() => setCurrentScreen('anonymous')}
+              onAuth={() => setCurrentScreen('auth_choice')}
+              onDeepLinkToken={pendingLinkToken}
+          />
+      );
+  }
+  if (currentScreen === 'anonymous') {
+      return (
+          <AnonymousStreamScreen
+              onBack={() => setCurrentScreen('home')}
+              onStart={startAnonymousStream}
+          />
+      );
+  }
+  if (currentScreen === 'auth_choice') {
+      return (
+          <AuthChoiceScreen
+              onBack={() => setCurrentScreen('home')}
+              onVk={() => openSettings('auth_choice')}
+              onWaaf={() => setCurrentScreen('waaf_login')}
+          />
+      );
+  }
+  if (currentScreen === 'waaf_login') {
+      return (
+          <WaafLoginScreen
+              onBack={() => setCurrentScreen('auth_choice')}
+              onSuccess={() => setCurrentScreen('auth_home')}
+          />
+      );
+  }
+  if (currentScreen === 'auth_home') {
+      return (
+          <AuthenticatedHomeScreen
+              initialToken={pendingLinkToken}
+              onBack={handleBackToStart}
+              onOpenSettings={() => openSettings('auth_home')}
+              onTokenResolved={handleTokenResolved}
+              onStandalone={handleStandalonePress}
+              onVkRequired={() => openSettings('auth_home')}
+          />
+      );
+  }
   if (currentScreen === 'step1_tourn') {
       return (
           <TournamentLoginScreen
@@ -534,10 +645,12 @@ export default function App() {
           <MatchControlScreen
               match={selectedMatch}
               matchRoster={matchRoster}
-              onBack={isStandaloneSession ? () => setCurrentScreen('step_standalone_club') : handleBackToSchedule}
+              onBack={isGuestFreemium ? handleBackToStart : isStandaloneSession ? () => setCurrentScreen('step_standalone_club') : handleBackToSchedule}
               accessCode={matchAccessCode}
               sessionToken={matchSessionToken}
               operatorToken={operatorToken}
+              tokenType={tokenType}
+              freemiumMode={isGuestFreemium}
               onOpenSettings={() => openSettings('control')}
               isStandaloneSession={isStandaloneSession}
           />
@@ -649,7 +762,7 @@ function RosterEditScreen({ match, onSave, onBack, accessCode = null, sessionTok
 // ==================================================
 // MATCH CONTROL SCREEN (ГОЛЫ + АССИСТЕНТЫ + JAVA ЗВУК)
 // ==================================================
-function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, sessionToken = null, operatorToken = null, onOpenSettings, isStandaloneSession = false }) {
+function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, sessionToken = null, operatorToken = null, tokenType = null, freemiumMode = false, onOpenSettings, isStandaloneSession = false }) {
   const videoRef = useRef<WaafLivestreamViewRef>(null);
   const streamStatsRef = useRef({ videoFrames: 0 });
   const streamHealthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -700,8 +813,16 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   const sportType = match.sport_type || 'football'; 
   const halfDuration = match.half_duration || 45;
   
-  // Стриминг: standalone всегда; турнир — allow_stream или operator token
-  const canStream = isStandalone || match.allow_stream === 1 || match.allow_stream === true || !!operatorToken;
+  const isWebPult = tokenType === 'web_pult';
+  // Стриминг: standalone / guest freemium / stream-токен; веб-пульт — без камеры
+  const canStream = !isWebPult && (
+    isStandalone || freemiumMode || tokenType === 'stream' ||
+    (!tokenType && (match.allow_stream === 1 || match.allow_stream === true))
+  );
+
+  useEffect(() => {
+    if (freemiumMode) setEncoderQuality('low');
+  }, [freemiumMode]);
 
   useEffect(() => {
     const requestPermissions = async () => {

@@ -38,13 +38,28 @@ export function operatorFetch(
   return fetch(`${API_URL}${path}`, { ...options, headers, body });
 }
 
-export async function resolveOperatorToken(token: string): Promise<{ tournamentId: string }> {
+export type TokenType = 'stream' | 'web_pult';
+
+export type ResolvedTournamentToken = {
+  tournamentId: string;
+  name?: string;
+  tokenType: TokenType;
+  allowStream?: boolean;
+};
+
+export async function resolveOperatorToken(token: string): Promise<ResolvedTournamentToken> {
   const res = await fetch(`${API_URL}/api/tournaments/by-token/${encodeURIComponent(token)}`);
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || 'Ссылка недействительна');
   }
-  return res.json();
+  const data = await res.json();
+  return {
+    tournamentId: String(data.tournamentId),
+    name: data.name,
+    tokenType: data.tokenType === 'web_pult' ? 'web_pult' : 'stream',
+    allowStream: data.allowStream,
+  };
 }
 
 export async function fetchTournamentMatches(tournamentId: string) {
