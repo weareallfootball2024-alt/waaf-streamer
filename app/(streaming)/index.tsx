@@ -38,6 +38,7 @@ import {
   getStreamSetupHint,
   getVkShareUrl,
   loadStreamSettings,
+  saveStreamSettings,
 } from '../../services/streamConfig';
 import {
   adjustAutoQualityAfterStream,
@@ -62,7 +63,6 @@ import {
 } from '../../components/streaming/EntryScreens';
 import { createGuestLiveMatch } from '../../services/guestMatch';
 import { restoreSession } from '../../services/authSession';
-import { saveStreamSettings, loadStreamSettings } from '../../services/streamConfig';
 import type { TokenType } from '../../services/operatorFetch';
 
 function getPeriodLabel(period: number): string {

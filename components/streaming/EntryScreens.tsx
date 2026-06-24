@@ -13,11 +13,11 @@ import {
 } from 'react-native';
 import * as Linking from 'expo-linking';
 
-import { parseOperatorToken } from '../constants/streamPlatforms';
-import { login, restoreSession } from '../services/authSession';
-import { getStoredVkUserId } from '../services/vkAuth';
-import { resolveOperatorToken } from '../services/operatorFetch';
-import type { TokenType } from '../services/operatorFetch';
+import { parseOperatorToken } from '../../constants/streamPlatforms';
+import { login, restoreSession } from '../../services/authSession';
+import { getStoredVkUserId } from '../../services/vkAuth';
+import { resolveOperatorToken } from '../../services/operatorFetch';
+import type { TokenType } from '../../services/operatorFetch';
 
 const styles = StyleSheet.create({
   container: {
