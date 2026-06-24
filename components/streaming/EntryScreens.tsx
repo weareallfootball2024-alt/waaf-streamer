@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,6 +18,7 @@ import { login, restoreSession } from '../../services/authSession';
 import { getStoredVkUserId } from '../../services/vkAuth';
 import { resolveOperatorToken } from '../../services/operatorFetch';
 import type { TokenType } from '../../services/operatorFetch';
+import { fetchStreamBalance } from '../../services/streamApi';
 
 const styles = StyleSheet.create({
   container: {
@@ -40,6 +41,16 @@ const styles = StyleSheet.create({
     marginBottom: 28,
     lineHeight: 18,
   },
+  balanceCard: {
+    backgroundColor: '#1a4384',
+    borderRadius: 14,
+    padding: 16,
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  balanceLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: '700', marginBottom: 4 },
+  balanceValue: { color: '#fff', fontSize: 32, fontWeight: '900' },
+  balanceHint: { color: 'rgba(255,255,255,0.75)', fontSize: 12, marginTop: 6 },
   hashTag: {
     color: '#e31e24',
     fontWeight: '800',
@@ -342,6 +353,17 @@ export function AuthenticatedHomeScreen({
 }: AuthHomeProps) {
   const [tokenInput, setTokenInput] = useState(initialToken);
   const [loading, setLoading] = useState(false);
+  const [balanceRub, setBalanceRub] = useState<number | null>(null);
+  const [matchPriceRub, setMatchPriceRub] = useState<number | null>(null);
+
+  useEffect(() => {
+    fetchStreamBalance()
+      .then((b) => {
+        setBalanceRub(b.balance_rub);
+        setMatchPriceRub(b.standalone_match_price_rub);
+      })
+      .catch(() => {});
+  }, []);
 
   const handleToken = async () => {
     const token = parseOperatorToken(tokenInput);
@@ -398,6 +420,16 @@ export function AuthenticatedHomeScreen({
 
       <Text style={styles.title}>Личный кабинет</Text>
       <Text style={styles.subtitle}>Токен турнира или матч вне платформы</Text>
+
+      {balanceRub != null && (
+        <View style={styles.balanceCard}>
+          <Text style={styles.balanceLabel}>Баланс трансляций</Text>
+          <Text style={styles.balanceValue}>{balanceRub} ₽</Text>
+          {matchPriceRub != null && (
+            <Text style={styles.balanceHint}>{matchPriceRub} ₽ за матч вне турнира</Text>
+          )}
+        </View>
+      )}
 
       <Text style={{ color: '#9ca3af', fontSize: 11, fontWeight: '700', marginBottom: 8 }}>ТОКЕН ТУРНИРА</Text>
       <TextInput

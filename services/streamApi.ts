@@ -5,9 +5,12 @@ import { getStoredVkUserId } from './vkAuth';
 export type StreamAccess = {
   can_stream_standalone: boolean;
   standalone_match_price_rub: number;
+  balance_rub?: number;
+  balance_kopecks?: number;
   needs_auth?: boolean;
   needs_waaf_login?: boolean;
   needs_payment?: boolean;
+  needs_topup?: boolean;
   is_superadmin?: boolean;
   free_reason?: string;
   reason?: string;
@@ -15,6 +18,15 @@ export type StreamAccess = {
   suggest_tournament?: boolean;
   tournament_hint?: string;
   identity_mode?: 'waaf' | 'vk';
+};
+
+export type StreamBalance = {
+  balance_rub: number;
+  balance_kopecks: number;
+  standalone_match_price_rub: number;
+  can_afford_match: boolean;
+  min_topup_rub: number;
+  max_topup_rub: number;
 };
 
 export async function buildStreamIdentityHeaders(): Promise<Record<string, string>> {
@@ -37,7 +49,36 @@ export async function fetchStreamAccess(): Promise<StreamAccess> {
   return data as StreamAccess;
 }
 
-export async function initStandalonePayment(): Promise<{
+export async function fetchStreamBalance(): Promise<StreamBalance> {
+  const headers = await buildStreamIdentityHeaders();
+  delete headers['Content-Type'];
+  const res = await fetch(`${API_URL}/api/stream/balance`, { headers });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Не удалось загрузить баланс');
+  }
+  return data as StreamBalance;
+}
+
+export async function initBalanceTopup(amountRub: number): Promise<{
+  payment_id: number;
+  paymentUrl: string;
+  amount_rub: number;
+}> {
+  const headers = await buildStreamIdentityHeaders();
+  const res = await fetch(`${API_URL}/api/stream/balance/topup/init`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ amount_rub: amountRub }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Не удалось начать пополнение');
+  }
+  return data;
+}
+
+export async function initStandalonePayment(amountRub?: number): Promise<{
   payment_id: number;
   paymentUrl: string;
   amount_rub: number;
@@ -46,7 +87,7 @@ export async function initStandalonePayment(): Promise<{
   const res = await fetch(`${API_URL}/api/stream/pay/init`, {
     method: 'POST',
     headers,
-    body: '{}',
+    body: JSON.stringify(amountRub != null ? { amount_rub: amountRub } : {}),
   });
   const data = await res.json();
   if (!res.ok) {

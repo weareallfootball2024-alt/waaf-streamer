@@ -500,7 +500,7 @@ export default function App() {
                   );
                   return;
               }
-              if (access.needs_payment) {
+              if (access.needs_payment || access.needs_topup) {
                   setPendingStandaloneCtx(ctx);
                   setStandaloneAccess(access);
                   setCurrentScreen('step_standalone_pay');
@@ -771,6 +771,9 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     quality: ResolvedStreamQuality;
     hadDisconnect: boolean;
   } | null>(null);
+  const streamSecondsRef = useRef(0);
+  const streamTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const wasStreamingRef = useRef(false);
   const pendingStreamQualityRef = useRef<ResolvedStreamQuality>('medium');
   const [vkShareUrl, setVkShareUrl] = useState('');
   const [streamHealth, setStreamHealth] = useState('');
@@ -964,6 +967,48 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     return getActualSeconds(timerBase, timerUpdatedAt, isTimerRunning, timerDirection);
   };
 
+  const sendStreamHeartbeat = (opts: { is_streaming?: boolean; stream_disconnected?: boolean } = {}) => {
+    if (!isStandalone || !match.id) return;
+    const payload = {
+      streaming_seconds: streamSecondsRef.current,
+      is_streaming: opts.is_streaming ?? isStreaming,
+      stream_disconnected: opts.stream_disconnected ?? false,
+      timer_seconds: getCurrentDisplaySeconds(),
+      access_code: accessCode,
+    };
+    matchApi(`/api/match/${match.id}/stream-heartbeat`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  };
+
+  const stopStreamTick = () => {
+    if (streamTickRef.current) {
+      clearInterval(streamTickRef.current);
+      streamTickRef.current = null;
+    }
+  };
+
+  const startStreamTick = () => {
+    stopStreamTick();
+    streamTickRef.current = setInterval(() => {
+      if (streamSessionRef.current) {
+        streamSecondsRef.current = Math.max(
+          streamSecondsRef.current,
+          Math.round((Date.now() - streamSessionRef.current.startTime) / 1000),
+        );
+      }
+      sendStreamHeartbeat({ is_streaming: true });
+    }, 30000);
+  };
+
+  useEffect(() => () => {
+    stopStreamTick();
+    if (wasStreamingRef.current && isStandalone) {
+      sendStreamHeartbeat({ is_streaming: false, stream_disconnected: true });
+    }
+  }, []);
+
   const sendUpdate = (updates: any = {}, eventType: string | null = null, playerId: any = null, teamId: any = null, isHighlight = false, assistantId: any = null) => {
       if (updates.period !== undefined) setPeriod(updates.period);
       if (updates.score_home !== undefined) setScore((s) => ({ ...s, home: updates.score_home }));
@@ -1016,6 +1061,15 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
         try {
             await videoRef.current?.stopStreaming();
             setIsStreaming(false);
+            wasStreamingRef.current = false;
+            stopStreamTick();
+            if (streamSessionRef.current) {
+              streamSecondsRef.current = Math.max(
+                streamSecondsRef.current,
+                Math.round((Date.now() - streamSessionRef.current.startTime) / 1000),
+              );
+            }
+            sendStreamHeartbeat({ is_streaming: false, stream_disconnected: true });
             sendUpdate({ status: 'scheduled' });
             await finishAutoQualitySession(false);
             Alert.alert("Эфир остановлен");
@@ -1062,6 +1116,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   const handleStreamConnected = () => {
     setIsLoading(false);
     setIsStreaming(true);
+    wasStreamingRef.current = true;
     sendUpdate({ status: 'live' });
     streamStatsRef.current.videoFrames = 0;
     streamSessionRef.current = {
@@ -1069,6 +1124,8 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       quality: pendingStreamQualityRef.current,
       hadDisconnect: false,
     };
+    startStreamTick();
+    sendStreamHeartbeat({ is_streaming: true });
     if (streamHealthTimerRef.current) clearTimeout(streamHealthTimerRef.current);
     streamHealthTimerRef.current = setTimeout(() => {
       if (streamStatsRef.current.videoFrames < 10) {

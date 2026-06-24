@@ -15,7 +15,7 @@ import type { StandaloneMatchContext } from '../services/standaloneMatch';
 import {
   fetchPaymentStatus,
   fetchStreamAccess,
-  initStandalonePayment,
+  initBalanceTopup,
   type StreamAccess,
 } from '../services/streamApi';
 
@@ -27,6 +27,8 @@ type Props = {
   onOpenSettings: () => void;
 };
 
+const TOPUP_PRESETS = [500, 1000, 2000];
+
 export function StandalonePayScreen({
   matchContext,
   access,
@@ -37,6 +39,10 @@ export function StandalonePayScreen({
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(false);
   const [priceRub, setPriceRub] = useState(access.standalone_match_price_rub);
+  const [balanceRub, setBalanceRub] = useState(access.balance_rub ?? 0);
+  const [selectedTopup, setSelectedTopup] = useState(
+    TOPUP_PRESETS.find((p) => p >= priceRub) || priceRub || 1000,
+  );
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pendingPaymentId = useRef<number | null>(null);
 
@@ -49,18 +55,28 @@ export function StandalonePayScreen({
 
   useEffect(() => () => stopPoll(), []);
 
+  const refreshAccess = async () => {
+    const latest = await fetchStreamAccess();
+    setPriceRub(latest.standalone_match_price_rub);
+    setBalanceRub(latest.balance_rub ?? 0);
+    return latest;
+  };
+
   const handlePaid = async () => {
     stopPoll();
     setChecking(true);
     try {
-      const latest = await fetchStreamAccess();
+      const latest = await refreshAccess();
       if (latest.can_stream_standalone) {
         await onPaid();
         return;
       }
-      Alert.alert('Оплата', 'Платёж ещё обрабатывается. Подождите минуту и нажмите «Проверить оплату».');
+      Alert.alert(
+        'Пополнение',
+        'Платёж ещё обрабатывается. Подождите минуту и нажмите «Проверить баланс».',
+      );
     } catch (e: unknown) {
-      Alert.alert('Ошибка', e instanceof Error ? e.message : 'Не удалось проверить оплату');
+      Alert.alert('Ошибка', e instanceof Error ? e.message : 'Не удалось проверить баланс');
     } finally {
       setChecking(false);
     }
@@ -74,7 +90,10 @@ export function StandalonePayScreen({
         const status = await fetchPaymentStatus(paymentId);
         if (status.status === 'paid') {
           stopPoll();
-          await onPaid();
+          const latest = await refreshAccess();
+          if (latest.can_stream_standalone) {
+            await onPaid();
+          }
         }
       } catch {
         /* ignore transient errors */
@@ -85,11 +104,11 @@ export function StandalonePayScreen({
   const handlePay = async () => {
     setLoading(true);
     try {
-      const { payment_id, paymentUrl } = await initStandalonePayment();
+      const { payment_id, paymentUrl } = await initBalanceTopup(selectedTopup);
       startPoll(payment_id);
       await WebBrowser.openBrowserAsync(paymentUrl);
     } catch (e: unknown) {
-      Alert.alert('Оплата', e instanceof Error ? e.message : 'Не удалось открыть оплату');
+      Alert.alert('Пополнение', e instanceof Error ? e.message : 'Не удалось открыть оплату');
     } finally {
       setLoading(false);
     }
@@ -101,8 +120,11 @@ export function StandalonePayScreen({
       try {
         const status = await fetchPaymentStatus(pendingPaymentId.current);
         if (status.status === 'paid') {
-          await onPaid();
-          return;
+          const latest = await refreshAccess();
+          if (latest.can_stream_standalone) {
+            await onPaid();
+            return;
+          }
         }
       } catch {
         /* fall through */
@@ -114,10 +136,10 @@ export function StandalonePayScreen({
   };
 
   useEffect(() => {
-    fetchStreamAccess()
-      .then((data) => setPriceRub(data.standalone_match_price_rub))
-      .catch(() => {});
+    refreshAccess().catch(() => {});
   }, []);
+
+  const shortfall = Math.max(0, priceRub - balanceRub);
 
   return (
     <SafeAreaView style={styles.root}>
@@ -125,7 +147,7 @@ export function StandalonePayScreen({
         <TouchableOpacity onPress={onBack}>
           <Text style={styles.back}>← НАЗАД</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>ОПЛАТА ЭФИРА</Text>
+        <Text style={styles.title}>БАЛАНС</Text>
         <View style={{ width: 60 }} />
       </View>
 
@@ -135,12 +157,33 @@ export function StandalonePayScreen({
         </Text>
         <Text style={styles.subtitle}>Матч вне турнира</Text>
 
-        <View style={styles.priceBox}>
-          <Text style={styles.priceLabel}>Стоимость трансляции</Text>
-          <Text style={styles.price}>{priceRub} ₽</Text>
+        <View style={styles.balanceBox}>
+          <Text style={styles.balanceLabel}>На балансе</Text>
+          <Text style={styles.balance}>{balanceRub} ₽</Text>
+          <Text style={styles.balanceHint}>
+            Стоимость матча — {priceRub} ₽
+            {shortfall > 0 ? ` · не хватает ${shortfall} ₽` : ''}
+          </Text>
+        </View>
+
+        <Text style={styles.presetLabel}>Сумма пополнения</Text>
+        <View style={styles.presetRow}>
+          {TOPUP_PRESETS.map((amount) => (
+            <TouchableOpacity
+              key={amount}
+              style={[styles.presetBtn, selectedTopup === amount && styles.presetBtnActive]}
+              onPress={() => setSelectedTopup(amount)}
+            >
+              <Text style={[styles.presetText, selectedTopup === amount && styles.presetTextActive]}>
+                {amount} ₽
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
 
         <Text style={styles.hint}>
+          Списание — после завершения эфира. Оплата не нужна, если матч не транслировался.
+          {'\n\n'}
           {access.tournament_hint
             || 'Проведите турнир на платформе WAAF — все матчи турнира в стримере без оплаты.'}
         </Text>
@@ -149,7 +192,7 @@ export function StandalonePayScreen({
           {loading ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.btnText}>ОПЛАТИТЬ {priceRub} ₽</Text>
+            <Text style={styles.btnText}>ПОПОЛНИТЬ {selectedTopup} ₽</Text>
           )}
         </TouchableOpacity>
 
@@ -157,7 +200,7 @@ export function StandalonePayScreen({
           {checking ? (
             <ActivityIndicator color="#e31e24" />
           ) : (
-            <Text style={styles.btnSecondaryText}>ПРОВЕРИТЬ ОПЛАТУ</Text>
+            <Text style={styles.btnSecondaryText}>ПРОВЕРИТЬ БАЛАНС</Text>
           )}
         </TouchableOpacity>
 
@@ -205,15 +248,34 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     fontWeight: '600',
   },
-  priceBox: {
+  balanceBox: {
     backgroundColor: '#1a4384',
     borderRadius: 16,
     padding: 24,
     alignItems: 'center',
     marginBottom: 20,
   },
-  priceLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: '600', marginBottom: 8 },
-  price: { color: '#fff', fontSize: 40, fontWeight: 'bold' },
+  balanceLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: '600', marginBottom: 8 },
+  balance: { color: '#fff', fontSize: 40, fontWeight: 'bold' },
+  balanceHint: { color: 'rgba(255,255,255,0.75)', fontSize: 13, marginTop: 10, textAlign: 'center' },
+  presetLabel: {
+    color: '#9ca3af',
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  presetRow: { flexDirection: 'row', justifyContent: 'center', gap: 10, marginBottom: 20 },
+  presetBtn: {
+    borderWidth: 1,
+    borderColor: '#444',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  presetBtnActive: { borderColor: '#e31e24', backgroundColor: 'rgba(227,30,36,0.15)' },
+  presetText: { color: '#aaa', fontWeight: 'bold', fontSize: 14 },
+  presetTextActive: { color: '#fff' },
   hint: { color: '#aaa', fontSize: 13, lineHeight: 20, textAlign: 'center', marginBottom: 28 },
   btnPrimary: {
     backgroundColor: '#e31e24',
