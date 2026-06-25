@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -333,13 +334,13 @@ export function StreamSettingsScreen({ onClose }: Props) {
   const hasCommunity = !!vk.communityId;
 
   return (
-    <View style={styles.root}>
+    <SafeAreaView style={styles.root}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={onClose}>
+        <TouchableOpacity onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
           <Text style={styles.back}>← НАЗАД</Text>
         </TouchableOpacity>
         <Text style={styles.title}>НАСТРОЙКИ ТРАНСЛЯЦИИ</Text>
-        <TouchableOpacity onPress={handleSave} disabled={saving}>
+        <TouchableOpacity onPress={handleSave} disabled={saving} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
           {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.save}>СОХРАНИТЬ</Text>}
         </TouchableOpacity>
       </View>
@@ -672,7 +673,7 @@ export function StreamSettingsScreen({ onClose }: Props) {
           </View>
         )}
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -687,6 +688,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#333',
+    zIndex: 10,
+    elevation: 10,
+    backgroundColor: '#121212',
   },
   back: { color: '#e31e24', fontWeight: 'bold', fontSize: 14 },
   title: { color: '#fff', fontWeight: 'bold', fontSize: 16 },

@@ -7,11 +7,14 @@ export default function VkOAuthReturnScreen() {
   const router = useRouter();
 
   useEffect(() => {
-    if (router.canGoBack()) {
-      router.back();
-    } else {
-      router.replace('/');
-    }
+    const timer = setTimeout(() => {
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace('/(streaming)');
+      }
+    }, 0);
+    return () => clearTimeout(timer);
   }, [router]);
 
   return (

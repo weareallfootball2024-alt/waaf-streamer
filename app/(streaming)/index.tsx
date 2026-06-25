@@ -59,8 +59,10 @@ import {
   AuthChoiceScreen,
   AuthenticatedHomeScreen,
   MainHomeScreen,
+  VkLoginScreen,
   WaafLoginScreen,
 } from '../../components/streaming/EntryScreens';
+import { getStoredVkUserId } from '../../services/vkAuth';
 import { createGuestLiveMatch } from '../../services/guestMatch';
 import { restoreSession } from '../../services/authSession';
 import type { TokenType } from '../../services/operatorFetch';
@@ -302,8 +304,8 @@ export default function App() {
   };
 
   useEffect(() => {
-    restoreSession().then((user) => {
-      if (user) setCurrentScreen('auth_home');
+    Promise.all([restoreSession(), getStoredVkUserId()]).then(([user, vkUserId]) => {
+      if (user || vkUserId) setCurrentScreen('auth_home');
     });
   }, []);
 
@@ -554,8 +556,16 @@ export default function App() {
       return (
           <AuthChoiceScreen
               onBack={() => setCurrentScreen('home')}
-              onVk={() => openSettings('auth_choice')}
+              onVk={() => setCurrentScreen('vk_login')}
               onWaaf={() => setCurrentScreen('waaf_login')}
+          />
+      );
+  }
+  if (currentScreen === 'vk_login') {
+      return (
+          <VkLoginScreen
+              onBack={() => setCurrentScreen('auth_choice')}
+              onSuccess={() => setCurrentScreen('auth_home')}
           />
       );
   }

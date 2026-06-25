@@ -15,7 +15,7 @@ import * as Linking from 'expo-linking';
 
 import { parseOperatorToken } from '../../constants/streamPlatforms';
 import { login, restoreSession } from '../../services/authSession';
-import { getStoredVkUserId } from '../../services/vkAuth';
+import { getStoredVkUserId, loginWithVk } from '../../services/vkAuth';
 import { resolveOperatorToken } from '../../services/operatorFetch';
 import type { TokenType } from '../../services/operatorFetch';
 import { fetchStreamBalance } from '../../services/streamApi';
@@ -288,6 +288,46 @@ type WaafLoginProps = {
   onBack: () => void;
   onSuccess: () => void;
 };
+
+type VkLoginProps = {
+  onBack: () => void;
+  onSuccess: () => void;
+};
+
+export function VkLoginScreen({ onBack, onSuccess }: VkLoginProps) {
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = async () => {
+    setLoading(true);
+    try {
+      await loginWithVk();
+      onSuccess();
+    } catch (e) {
+      Alert.alert('Ошибка', e instanceof Error ? e.message : 'Не удалось войти через VK');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <TouchableOpacity onPress={onBack} disabled={loading}>
+        <Text style={styles.back}>◀ НАЗАД</Text>
+      </TouchableOpacity>
+      <Text style={styles.title}>VK</Text>
+      <Text style={styles.subtitle}>
+        Вход для матчей вне платформы и трансляций в VK Видео
+      </Text>
+      <TouchableOpacity
+        style={[styles.btn, { backgroundColor: '#0077FF' }]}
+        onPress={handleLogin}
+        disabled={loading}
+      >
+        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>ВОЙТИ ЧЕРЕЗ VK</Text>}
+      </TouchableOpacity>
+    </View>
+  );
+}
 
 export function WaafLoginScreen({ onBack, onSuccess }: WaafLoginProps) {
   const [phone, setPhone] = useState('');
