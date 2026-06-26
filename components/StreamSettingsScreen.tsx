@@ -29,7 +29,7 @@ import { copyAdClipToStorage, MAX_CLIPS, newAdClipId, trimAdClips } from '../ser
 import { clearSession, getUser, login, restoreSession, saveSession } from '../services/authSession';
 import { linkWaafAccount } from '../services/streamApi';
 import { loadStreamSettings, saveStreamSettings } from '../services/streamConfig';
-import { setPlaylistSessionRtmp } from '../services/vkPlaylistSession';
+import { getPlaylistSessionRtmp, setPlaylistSessionRtmp } from '../services/vkPlaylistSession';
 import {
   clearVkToken,
   fetchAdminGroups,
@@ -89,6 +89,11 @@ export function StreamSettingsScreen({ onClose }: Props) {
     (async () => {
       const saved = await loadStreamSettings();
       setSettings(saved);
+      const playlistSession = getPlaylistSessionRtmp();
+      if (playlistSession) {
+        setPlaylistRtmpUrl(playlistSession.rtmpUrl);
+        setPlaylistStreamKey(playlistSession.streamKey);
+      }
       const token = await getStoredVkToken();
       const storedVkId = await getStoredVkUserId();
       setVkUserId(storedVkId);
@@ -126,6 +131,13 @@ export function StreamSettingsScreen({ onClose }: Props) {
   const handleSave = async () => {
     setSaving(true);
     try {
+      if (
+        settings.vk.streamTarget === 'playlist' &&
+        playlistRtmpUrl.trim() &&
+        playlistStreamKey.trim()
+      ) {
+        setPlaylistSessionRtmp(playlistRtmpUrl, playlistStreamKey);
+      }
       await saveStreamSettings(settings);
       Alert.alert('Сохранено', 'Настройки трансляции обновлены');
       onClose();

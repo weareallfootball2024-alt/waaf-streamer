@@ -16,7 +16,7 @@ function normalizeStreamQuality(value: unknown): StreamQuality {
   }
   return DEFAULT_STREAM_SETTINGS.streamQuality;
 }
-import { getPlaylistSessionRtmp } from './vkPlaylistSession';
+import { getPlaylistSessionRtmp, hydratePlaylistSessionRtmp } from './vkPlaylistSession';
 
 const SETTINGS_KEY = 'waaf_stream_settings';
 
@@ -29,6 +29,7 @@ function normalizeVkConfig(vk: Partial<VkPlatformConfig> | undefined): VkPlatfor
 }
 
 export async function loadStreamSettings(): Promise<StreamSettings> {
+  await hydratePlaylistSessionRtmp();
   try {
     const raw = await SecureStore.getItemAsync(SETTINGS_KEY);
     if (!raw) return { ...DEFAULT_STREAM_SETTINGS };

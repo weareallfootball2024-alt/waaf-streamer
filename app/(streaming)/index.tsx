@@ -6,7 +6,7 @@ import {
     FlatList,
     Image,
     Modal,
-    PermissionsAndroid, Platform,
+    Platform,
     SafeAreaView,
     ScrollView,
     StatusBar,
@@ -46,16 +46,21 @@ import {
   type ResolvedStreamQuality,
 } from '../../services/streamQuality';
 import { checkStreamReadiness } from '../../services/streamReadiness';
+import {
+  getStreamPermissionState,
+  openAppSettings,
+  requestStreamPermissions,
+} from '../../services/streamPermissions';
 import { fetchStreamAccess, type StreamAccess } from '../../services/streamApi';
 import {
   createStandaloneLiveMatch,
+  type AnonymousMatchContext,
   type StandaloneMatchContext,
 } from '../../services/standaloneMatch';
-import { buildRtmpEndpoint, maskRtmpEndpoint, validateRtmpSettings } from '../../services/rtmpEndpoint';
+import { buildRtmpEndpoint, maskRtmpEndpoint, normalizeRtmpFields, validateRtmpSettings } from '../../services/rtmpEndpoint';
 import { formatTimer, getActualSeconds } from '../../utils/matchTimer';
 import * as Linking from 'expo-linking';
 import {
-  AnonymousStreamScreen,
   AuthChoiceScreen,
   AuthenticatedHomeScreen,
   MainHomeScreen,
@@ -77,6 +82,14 @@ function getPeriodLabel(period: number): string {
   if (period === 6) return 'Доп. время 2';
   if (period === 7) return 'Пенальти';
   return 'Завершён';
+}
+
+function resolveLogoUri(logo?: string | null): string | null {
+  if (!logo) return null;
+  if (logo.startsWith('http') || logo.startsWith('file://') || logo.startsWith('content://')) {
+    return logo;
+  }
+  return `${API_URL}${logo}`;
 }
 
 // ==================================================
@@ -381,12 +394,7 @@ export default function App() {
       }
   };
 
-  const startAnonymousStream = async (payload: {
-    rtmpUrl: string;
-    streamKey: string;
-    teamHome: string;
-    teamAway: string;
-  }) => {
+  const startAnonymousStream = async (ctx: AnonymousMatchContext) => {
       try {
           const settings = await loadStreamSettings();
           settings.streamQuality = 'low';
@@ -394,13 +402,26 @@ export default function App() {
           settings.youtube = {
               ...settings.youtube,
               enabled: true,
-              rtmpUrl: payload.rtmpUrl,
-              streamKey: payload.streamKey,
+              rtmpUrl: ctx.rtmpUrl,
+              streamKey: ctx.streamKey,
           };
           await saveStreamSettings(settings);
 
-          const data = await createGuestLiveMatch(payload.teamHome, payload.teamAway);
-          setSelectedMatch({ ...data.match, guest: true, freemium: true });
+          const data = await createGuestLiveMatch({
+            teamHome: ctx.teamHome,
+            teamAway: ctx.teamAway,
+            clubId: ctx.clubId,
+            awayClubId: ctx.awayClubId,
+            clubLogoUri: ctx.clubLogoUri || undefined,
+            awayLogoUri: ctx.awayLogoUri,
+          });
+          setSelectedMatch({
+            ...data.match,
+            guest: true,
+            freemium: true,
+            logo_home: data.match.logo_home || ctx.clubLogoUri || null,
+            logo_away: data.match.logo_away || ctx.awayLogoUri || null,
+          });
           setMatchRoster([]);
           setIsGuestFreemium(true);
           setIsStandaloneSession(false);
@@ -546,7 +567,8 @@ export default function App() {
   }
   if (currentScreen === 'anonymous') {
       return (
-          <AnonymousStreamScreen
+          <StandaloneMatchSetupScreen
+              anonymousMode
               onBack={() => setCurrentScreen('home')}
               onStart={startAnonymousStream}
           />
@@ -661,7 +683,6 @@ export default function App() {
               operatorToken={operatorToken}
               tokenType={tokenType}
               freemiumMode={isGuestFreemium}
-              onOpenSettings={() => openSettings('control')}
               isStandaloneSession={isStandaloneSession}
           />
       );
@@ -772,8 +793,10 @@ function RosterEditScreen({ match, onSave, onBack, accessCode = null, sessionTok
 // ==================================================
 // MATCH CONTROL SCREEN (ГОЛЫ + АССИСТЕНТЫ + JAVA ЗВУК)
 // ==================================================
-function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, sessionToken = null, operatorToken = null, tokenType = null, freemiumMode = false, onOpenSettings, isStandaloneSession = false }) {
+function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, sessionToken = null, operatorToken = null, tokenType = null, freemiumMode = false, isStandaloneSession = false }) {
   const videoRef = useRef<WaafLivestreamViewRef>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const openStreamSettings = () => setSettingsOpen(true);
   const streamStatsRef = useRef({ videoFrames: 0 });
   const streamHealthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamSessionRef = useRef<{
@@ -805,6 +828,8 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   const [isStreaming, setIsStreaming] = useState(false); 
   const [isLoading, setIsLoading] = useState(false);
   const [permissionGranted, setPermissionGranted] = useState(false);
+  const [permissionBlocked, setPermissionBlocked] = useState(false);
+  const [permissionLoading, setPermissionLoading] = useState(false);
   const [isMuted, setIsMuted] = useState(false); 
 
   // Состояния игры
@@ -838,22 +863,46 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   }, [freemiumMode]);
 
   useEffect(() => {
-    const requestPermissions = async () => {
-        if (Platform.OS === 'android' && canStream) {
-            try {
-                const granted = await PermissionsAndroid.requestMultiple([
-                    PermissionsAndroid.PERMISSIONS.CAMERA,
-                    PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-                ]);
-                if (granted[PermissionsAndroid.PERMISSIONS.CAMERA] === PermissionsAndroid.RESULTS.GRANTED &&
-                    granted[PermissionsAndroid.PERMISSIONS.RECORD_AUDIO] === PermissionsAndroid.RESULTS.GRANTED) {
-                    setPermissionGranted(true);
-                }
-            } catch (err) { console.warn(err); }
-        }
-    };
-    requestPermissions();
+    if (!canStream) return;
+    getStreamPermissionState().then((state) => {
+      if (state === 'granted') setPermissionGranted(true);
+      if (state === 'blocked') setPermissionBlocked(true);
+    });
   }, [canStream]);
+
+  const ensureCameraPermissions = async (showAlertOnDeny = false): Promise<boolean> => {
+    if (!canStream) return false;
+    setPermissionLoading(true);
+    try {
+      const state = await getStreamPermissionState();
+      if (state === 'granted') {
+        setPermissionGranted(true);
+        setPermissionBlocked(false);
+        return true;
+      }
+      if (state === 'blocked') {
+        setPermissionGranted(false);
+        setPermissionBlocked(true);
+        if (showAlertOnDeny) {
+          Alert.alert(
+            'Нет доступа',
+            'Включите камеру и микрофон в настройках приложения.',
+            [{ text: 'Открыть настройки', onPress: openAppSettings }, { text: 'OK' }],
+          );
+        }
+        return false;
+      }
+      const ok = await requestStreamPermissions();
+      setPermissionGranted(ok);
+      setPermissionBlocked(!ok);
+      if (!ok && showAlertOnDeny) {
+        Alert.alert('Нет доступа', 'Разрешите камеру и микрофон — без них трансляция невозможна.');
+      }
+      return ok;
+    } finally {
+      setPermissionLoading(false);
+    }
+  };
 
   // Загрузка настроек ничьей из конфига турнира
   const [drawEt, setDrawEt] = useState(false);
@@ -1061,8 +1110,9 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
 
   const handleToggleStream = async () => {
     if (!permissionGranted) {
-        Alert.alert("Нет доступа", "Нужны права на камеру и микрофон");
-        return;
+      const ok = await ensureCameraPermissions(true);
+      if (!ok) return;
+      await new Promise((resolve) => setTimeout(resolve, 600));
     }
     if (isLoading) return;
     setIsLoading(true);
@@ -1092,31 +1142,46 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             const settings = await loadStreamSettings();
             streamQualitySettingRef.current = settings.streamQuality;
             const quality = await resolveEncoderQuality(settings.streamQuality);
-            setEncoderQuality(quality);
+            if (quality !== encoderQuality) setEncoderQuality(quality);
             const rtmp = getActiveRtmpConfig(settings, match.id);
             if (!rtmp) {
                 Alert.alert(
                     "Настройте трансляцию",
                     getStreamSetupHint(settings),
-                    [{ text: "Открыть настройки", onPress: onOpenSettings }, { text: "OK" }]
+                    [{ text: "Открыть настройки", onPress: openStreamSettings }, { text: "OK" }]
                 );
                 return;
             }
 
-            const rtmpError = validateRtmpSettings(rtmp.rtmpUrl, rtmp.streamKey);
+            const normalized = normalizeRtmpFields(rtmp.rtmpUrl, rtmp.streamKey);
+            const rtmpError = validateRtmpSettings(normalized.rtmpUrl, normalized.streamKey);
             if (rtmpError) {
               Alert.alert('Настройки RTMP', rtmpError);
               return;
             }
-            const endpoint = buildRtmpEndpoint(rtmp.rtmpUrl, rtmp.streamKey);
+            const endpoint = buildRtmpEndpoint(normalized.rtmpUrl, normalized.streamKey);
             console.log('[stream] RTMP →', maskRtmpEndpoint(endpoint), 'muted=', isMuted);
             pendingStreamQualityRef.current = quality;
-            await videoRef.current?.startStreaming(rtmp.streamKey, rtmp.rtmpUrl, isMuted, quality);
+            if (!videoRef.current) {
+              Alert.alert(
+                'Ошибка запуска',
+                'Модуль камеры не загрузился. Выйдите из матча и зайдите снова — при запросе разрешите камеру и микрофон.',
+              );
+              return;
+            }
+            await videoRef.current.startStreaming(normalized.streamKey, normalized.rtmpUrl, isMuted, quality);
             waitingConnection = true;
         } catch (e: any) {
             console.error(e);
             setIsStreaming(false);
-            Alert.alert("Ошибка запуска", "Не удалось начать стрим. Проверьте URL и ключ.");
+            const msg = typeof e?.message === 'string' ? e.message : '';
+            const viewBroken = /ErrorGroupView|ClassCastException|WaafLivestream\.startStreaming/i.test(msg);
+            Alert.alert(
+              'Ошибка запуска',
+              viewBroken
+                ? 'Модуль камеры не загрузился. Выйдите из матча и зайдите снова, разрешив камеру и микрофон.'
+                : msg || 'Не удалось начать стрим. Проверьте RTMP URL и ключ в настройках VK Studio.',
+            );
         } finally {
             if (!waitingConnection) setIsLoading(false);
         }
@@ -1511,8 +1576,9 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       <StatusBar hidden />
       <View style={StyleSheet.absoluteFill}>
           {/* 🔥 ИСПРАВЛЕНО: Глубокий черный экран для экономии батареи, если стрим выключен */}
-          {canStream ? (
+          {canStream && permissionGranted ? (
             <WaafLivestreamView
+                key="waaf-livestream"
                 ref={videoRef}
                 style={{ flex: 1 }}
                 camera="back"
@@ -1530,8 +1596,8 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                   const lower = code.toLowerCase();
                   const hint = code === 'auth_error'
                     ? 'Неверный RTMP URL или ключ. Скопируйте заново из VK Studio → Ключи и виджеты.'
-                    : code === 'encoder_prepare_failed'
-                    ? 'Камера/микрофон не готовы. Перезапустите экран матча.'
+                    : code === 'encoder_prepare_failed' || code === 'preview_failed'
+                    ? 'Камера не успела запуститься. Подождите 2–3 секунды и нажмите «Старт» снова.'
                     : lower.includes('broken pipe')
                     ? 'VK разорвал соединение при отправке видео.\n\n• Сбросьте ключ в VK Studio и вставьте заново\n• URL: rtmp://…/input/ или rtmps://pub.live.vkvideo.ru/app/\n• Ключ — отдельным полем, без vk.com\n• Попробуйте включить микрофон перед эфиром'
                     : `Ошибка: ${code}`;
@@ -1580,7 +1646,34 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                   );
                 }}
             />
-          ) : ( 
+          ) : canStream ? (
+            <View style={styles.permissionGate}>
+              <Text style={styles.permissionGateTitle}>Нужен доступ к камере и микрофону</Text>
+              <Text style={styles.permissionGateHint}>
+                {permissionBlocked
+                  ? 'Разрешения отключены в настройках Android. Включите их вручную.'
+                  : 'Нажмите кнопку — появится системный запрос.'}
+              </Text>
+              <TouchableOpacity
+                style={styles.permissionGateBtn}
+                onPress={() => (permissionBlocked ? openAppSettings() : ensureCameraPermissions(true))}
+                disabled={permissionLoading}
+              >
+                {permissionLoading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.permissionGateBtnText}>
+                    {permissionBlocked ? 'ОТКРЫТЬ НАСТРОЙКИ' : 'РАЗРЕШИТЬ КАМЕРУ И МИКРОФОН'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+              {permissionBlocked ? (
+                <TouchableOpacity style={styles.permissionGateLink} onPress={openAppSettings}>
+                  <Text style={styles.permissionGateLinkText}>Настройки приложения</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          ) : (
             <View style={{flex: 1, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center'}}>
                  <Text style={{color: '#333333', fontSize: 16, fontWeight: 'bold', textTransform: 'uppercase'}}>Эфир отключен организатором</Text>
             </View> 
@@ -1589,7 +1682,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       <SafeAreaView style={styles.overlay}>
         
       <View style={styles.header}>
-            <TouchableOpacity onPress={() => { if(isStreaming) { videoRef.current?.stopStreaming(); setIsStreaming(false); } onBack(); }} style={styles.backButton}><Text style={styles.backText}>{isStandaloneSession ? 'ВЫХОД' : 'К РАСПИСАНИЮ'}</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => { if(isStreaming) { videoRef.current?.stopStreaming(); setIsStreaming(false); } onBack(); }} style={styles.backButton}><Text style={styles.backText}>{isStandaloneSession || freemiumMode ? 'ВЫХОД' : 'К РАСПИСАНИЮ'}</Text></TouchableOpacity>
             <TouchableOpacity onPress={handleUndo} style={styles.undoButton}><Text style={styles.undoText}>↩ ОТМЕНА</Text></TouchableOpacity>
             <View style={styles.timerBox}><Text style={styles.timerText}>{formatTimer(displaySeconds)}</Text><Text style={styles.periodText}>{period === 0 ? 'Разминка' : period === 1 ? '1-й Тайм' : period === 2 ? 'Перерыв' : period === 3 ? '2-й Тайм' : period === 4 ? 'Перерыв (ДВ)' : period === 5 ? 'Доп. время 1' : period === 6 ? 'Доп. время 2' : period === 7 ? '⚽ Пенальти' : 'Завершён'}</Text></View>
             <View style={styles.headerInfo}><Text style={styles.matchTitle}>{match.team_home} vs {match.team_away}</Text></View>
@@ -1614,12 +1707,12 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
 
         <View style={styles.scoreboard}>
             <View style={styles.teamControl}>
-                <TouchableOpacity style={[styles.btnAction, {borderColor: '#e31e24'}]} onPress={() => openEventMenu('home')}>{logoHome ? <Image source={{ uri: logoHome.startsWith('http') ? logoHome : `${API_URL}${logoHome}` }} style={{width: 60, height: 60, resizeMode: 'contain'}} /> : <Text style={styles.btnActionText}>⚡</Text>}</TouchableOpacity>
+                <TouchableOpacity style={[styles.btnAction, {borderColor: '#e31e24'}]} onPress={() => openEventMenu('home')}>{logoHome ? <Image source={{ uri: resolveLogoUri(logoHome) || undefined }} style={{width: 60, height: 60, resizeMode: 'contain'}} /> : <Text style={styles.btnActionText}>⚡</Text>}</TouchableOpacity>
                 <Text style={styles.scoreText}>{score.home}</Text><Text style={styles.teamName}>{match.team_home}</Text>{sportType === 'futsal' && <Text style={styles.foulText}>Фолы: {fouls.home}</Text>}
             </View>
             <Text style={styles.vs}>:</Text>
             <View style={styles.teamControl}>
-                <TouchableOpacity style={[styles.btnAction, {borderColor: '#1a4384'}]} onPress={() => openEventMenu('away')}>{logoAway ? <Image source={{ uri: logoAway.startsWith('http') ? logoAway : `${API_URL}${logoAway}` }} style={{width: 60, height: 60, resizeMode: 'contain'}} /> : <Text style={styles.btnActionText}>⚡</Text>}</TouchableOpacity>
+                <TouchableOpacity style={[styles.btnAction, {borderColor: '#1a4384'}]} onPress={() => openEventMenu('away')}>{logoAway ? <Image source={{ uri: resolveLogoUri(logoAway) || undefined }} style={{width: 60, height: 60, resizeMode: 'contain'}} /> : <Text style={styles.btnActionText}>⚡</Text>}</TouchableOpacity>
                 <Text style={styles.scoreText}>{score.away}</Text><Text style={styles.teamName}>{match.team_away}</Text>{sportType === 'futsal' && <Text style={styles.foulText}>Фолы: {fouls.away}</Text>}
             </View>
         </View>
@@ -1727,7 +1820,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
 
             {period !== 4 && (
                 <View style={{flexDirection: 'row', alignItems: 'center', marginLeft: 10, gap: 10}}>
-                    <TouchableOpacity style={styles.btnMicSettings} onPress={onOpenSettings}>
+                    <TouchableOpacity style={styles.btnMicSettings} onPress={openStreamSettings}>
                         <Text style={styles.btnMicText}>⚙</Text>
                     </TouchableOpacity>
                     {canStream && isStreaming && (
@@ -1815,6 +1908,12 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
           }}
           onPickFile={handlePickAndPlayVideo}
         />
+
+        {settingsOpen ? (
+          <View style={styles.settingsOverlay}>
+            <StreamSettingsScreen onClose={() => setSettingsOpen(false)} />
+          </View>
+        ) : null}
 
       </SafeAreaView>
     </View>
@@ -1958,5 +2057,56 @@ const styles = StyleSheet.create({
   },
   btnMicText: {
     fontSize: 24,
+  },
+  settingsOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 200,
+    elevation: 20,
+    backgroundColor: '#0d0d0d',
+  },
+  permissionGate: {
+    flex: 1,
+    backgroundColor: '#000000',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+  },
+  permissionGateTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '900',
+    textAlign: 'center',
+    marginBottom: 10,
+    textTransform: 'uppercase',
+  },
+  permissionGateHint: {
+    color: '#888888',
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 18,
+  },
+  permissionGateBtn: {
+    backgroundColor: '#e31e24',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    minWidth: 260,
+    alignItems: 'center',
+  },
+  permissionGateBtnText: {
+    color: '#ffffff',
+    fontWeight: '900',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  permissionGateLink: {
+    marginTop: 14,
+    padding: 8,
+  },
+  permissionGateLinkText: {
+    color: '#4cd964',
+    fontWeight: 'bold',
+    fontSize: 13,
   },
 });

@@ -15,6 +15,7 @@ import {
 
 import {
   searchPublicClubs,
+  type AnonymousMatchContext,
   type PublicClub,
   type StandaloneMatchContext,
 } from '../services/standaloneMatch';
@@ -38,9 +39,10 @@ const emptySlot = (): TeamSlot => ({
 });
 
 type Props = {
-  onStart: (ctx: StandaloneMatchContext) => void | Promise<void>;
+  onStart: (ctx: StandaloneMatchContext | AnonymousMatchContext) => void | Promise<void>;
   onBack: () => void;
-  onOpenSettings: () => void;
+  onOpenSettings?: () => void;
+  anonymousMode?: boolean;
 };
 
 function teamDisplayName(slot: TeamSlot): string {
@@ -182,14 +184,17 @@ function TeamPicker({
   );
 }
 
-export function StandaloneMatchSetupScreen({ onStart, onBack, onOpenSettings }: Props) {
+export function StandaloneMatchSetupScreen({ onStart, onBack, onOpenSettings, anonymousMode = false }: Props) {
   const [home, setHome] = useState<TeamSlot>(emptySlot);
   const [away, setAway] = useState<TeamSlot>(emptySlot);
+  const [rtmpUrl, setRtmpUrl] = useState('');
+  const [streamKey, setStreamKey] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const homeName = teamDisplayName(home);
   const awayName = teamDisplayName(away);
-  const canStart = homeName.length > 0 && awayName.length > 0 && !submitting;
+  const rtmpReady = !anonymousMode || (rtmpUrl.trim().length > 0 && streamKey.trim().length > 0);
+  const canStart = homeName.length > 0 && awayName.length > 0 && rtmpReady && !submitting;
 
   const preview = useMemo(
     () => ({
@@ -203,9 +208,13 @@ export function StandaloneMatchSetupScreen({ onStart, onBack, onOpenSettings }: 
 
   const handleStart = async () => {
     if (!canStart) return;
+    if (anonymousMode && (!rtmpUrl.trim() || !streamKey.trim())) {
+      Alert.alert('RTMP', 'Укажите RTMP URL и ключ трансляции');
+      return;
+    }
     setSubmitting(true);
     try {
-      const ctx: StandaloneMatchContext = {
+      const base: StandaloneMatchContext = {
         standalone: true,
         clubId: home.selected?.id,
         clubName: homeName,
@@ -215,7 +224,15 @@ export function StandaloneMatchSetupScreen({ onStart, onBack, onOpenSettings }: 
         awayClubId: away.selected?.id,
         awayLogoUri: teamLogo(away) || undefined,
       };
-      await onStart(ctx);
+      if (anonymousMode) {
+        await onStart({
+          ...base,
+          rtmpUrl: rtmpUrl.trim(),
+          streamKey: streamKey.trim(),
+        });
+      } else {
+        await onStart(base);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -227,13 +244,43 @@ export function StandaloneMatchSetupScreen({ onStart, onBack, onOpenSettings }: 
         <TouchableOpacity onPress={onBack} style={styles.backBtn}>
           <Text style={styles.backText}>НАЗАД</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Быстрый матч</Text>
-        <TouchableOpacity onPress={onOpenSettings}>
-          <Text style={styles.settingsBtn}>⚙</Text>
-        </TouchableOpacity>
+        <Text style={styles.headerTitle}>{anonymousMode ? 'Быстрый матч' : 'Быстрый матч'}</Text>
+        {onOpenSettings ? (
+          <TouchableOpacity onPress={onOpenSettings}>
+            <Text style={styles.settingsBtn}>⚙</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={{ width: 36 }} />
+        )}
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll}>
+        {anonymousMode && (
+          <View style={styles.rtmpBlock}>
+            <Text style={styles.rtmpTitle}>RTMP трансляция</Text>
+            <Text style={styles.rtmpHint}>
+              Укажите сервер и ключ (VK Видео, YouTube и др.). Минимальное качество, водяной знак #мывсефутбол.
+            </Text>
+            <TextInput
+              style={styles.input}
+              placeholder="RTMP URL (rtmp://...)"
+              placeholderTextColor="#666"
+              value={rtmpUrl}
+              onChangeText={setRtmpUrl}
+              autoCapitalize="none"
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Ключ трансляции (stream key)"
+              placeholderTextColor="#666"
+              value={streamKey}
+              onChangeText={setStreamKey}
+              autoCapitalize="none"
+              secureTextEntry
+            />
+          </View>
+        )}
+
         <View style={styles.previewCard}>
           <View style={styles.previewSide}>
             <ClubLogo uri={preview.homeLogo} size={48} />
@@ -303,6 +350,16 @@ const styles = StyleSheet.create({
   headerTitle: { color: '#fff', fontSize: 18, fontWeight: '900' },
   settingsBtn: { color: '#4cd964', fontSize: 20, padding: 8 },
   scroll: { padding: 16, paddingBottom: 40 },
+  rtmpBlock: {
+    backgroundColor: '#141414',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  rtmpTitle: { color: '#fff', fontWeight: '900', fontSize: 12, marginBottom: 6, textTransform: 'uppercase' },
+  rtmpHint: { color: '#888', fontSize: 12, marginBottom: 10, lineHeight: 17 },
   previewCard: {
     flexDirection: 'row',
     alignItems: 'center',

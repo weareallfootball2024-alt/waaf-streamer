@@ -20,6 +20,11 @@ export type StandaloneMatchContext = {
   awayLogoUri?: string;
 };
 
+export type AnonymousMatchContext = StandaloneMatchContext & {
+  rtmpUrl: string;
+  streamKey: string;
+};
+
 export function buildStandaloneMatch(ctx: StandaloneMatchContext) {
   return {
     standalone: true,

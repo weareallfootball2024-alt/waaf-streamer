@@ -188,13 +188,21 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
       override fun surfaceCreated(holder: SurfaceHolder) {
         if (!genericStream.isOnPreview) {
-          if (!isPrepared) prepareEncoder(encoderQuality)
-          genericStream.startPreview(surfaceView)
+          try {
+            if (!isPrepared) prepareEncoder(encoderQuality)
+            genericStream.startPreview(surfaceView)
+          } catch (e: Exception) {
+            Log.e(TAG, "surfaceCreated preview failed", e)
+          }
         }
       }
 
       override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        genericStream.getGlInterface().setPreviewResolution(width, height)
+        try {
+          genericStream.getGlInterface().setPreviewResolution(width, height)
+        } catch (e: Exception) {
+          Log.w(TAG, "setPreviewResolution failed", e)
+        }
       }
 
       override fun surfaceDestroyed(holder: SurfaceHolder) {
@@ -388,10 +396,27 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     Log.i(TAG, "Start stream → ${maskEndpoint(endpoint)} muted=$muted")
 
     val delayMs = if (genericStream.isOnPreview) 1200L else 2000L
+    schedulePreviewAndPublish(delayMs, 0)
+  }
+
+  private fun schedulePreviewAndPublish(delayMs: Long, attempt: Int) {
     if (!genericStream.isOnPreview) {
-      genericStream.startPreview(surfaceView)
+      if (!isPrepared) prepareEncoder(encoderQuality)
+      try {
+        genericStream.startPreview(surfaceView)
+      } catch (e: Exception) {
+        Log.w(TAG, "startPreview attempt $attempt failed", e)
+      }
     }
-    mainHandler.postDelayed(publishRunnable, delayMs)
+    if (genericStream.isOnPreview) {
+      mainHandler.postDelayed(publishRunnable, delayMs)
+      return
+    }
+    if (attempt < 6) {
+      mainHandler.postDelayed({ schedulePreviewAndPublish(delayMs, attempt + 1) }, 400)
+      return
+    }
+    onConnectionFailed(mapOf("code" to "preview_failed"))
   }
 
   private fun publishStream() {
