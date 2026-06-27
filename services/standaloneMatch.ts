@@ -9,8 +9,11 @@ export type PublicClub = {
   logo_url?: string;
 };
 
+export type StandaloneTier = 'free' | 'premium';
+
 export type StandaloneMatchContext = {
   standalone: true;
+  tier: StandaloneTier;
   clubId?: number;
   clubName: string;
   clubLogoUri: string;
@@ -18,11 +21,8 @@ export type StandaloneMatchContext = {
   teamAway: string;
   awayClubId?: number;
   awayLogoUri?: string;
-};
-
-export type AnonymousMatchContext = StandaloneMatchContext & {
-  rtmpUrl: string;
-  streamKey: string;
+  rtmpUrl?: string;
+  streamKey?: string;
 };
 
 export function buildStandaloneMatch(ctx: StandaloneMatchContext) {
@@ -42,6 +42,7 @@ export function buildStandaloneMatch(ctx: StandaloneMatchContext) {
     sport_type: 'football',
     half_duration: 45,
     tournament_id: null,
+    standalone_tier: ctx.tier,
   };
 }
 
@@ -58,6 +59,7 @@ export type StandaloneLiveResponse = {
     half_duration: number;
     current_period: number;
     standalone: boolean;
+    standalone_tier?: StandaloneTier;
   };
   sessionToken: string;
   accessCode: string;
@@ -69,6 +71,7 @@ export async function createStandaloneLiveMatch(
   const res = await streamAuthFetch('/api/matches/standalone-live', {
     method: 'POST',
     body: JSON.stringify({
+      tier: ctx.tier,
       club_id: ctx.clubId,
       away_club_id: ctx.awayClubId,
       team_home: ctx.teamHome,

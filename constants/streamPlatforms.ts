@@ -43,6 +43,8 @@ export type AdClipPreset = {
 export type StreamSettings = {
   activePlatform: StreamPlatform;
   streamQuality: StreamQuality;
+  replayEnabled: boolean;
+  replaySeconds: number;
   adClips: AdClipPreset[];
   vk: VkPlatformConfig;
   youtube: PlatformConfig;
@@ -66,9 +68,13 @@ const emptyPlatform = (enabled: boolean): PlatformConfig => ({
   embedUrl: '',
 });
 
+export const REPLAY_SECONDS_OPTIONS = [5, 10, 15] as const;
+
 export const DEFAULT_STREAM_SETTINGS: StreamSettings = {
   activePlatform: 'vk',
   streamQuality: 'auto',
+  replayEnabled: true,
+  replaySeconds: 10,
   adClips: [],
   vk: {
     ...emptyPlatform(true),

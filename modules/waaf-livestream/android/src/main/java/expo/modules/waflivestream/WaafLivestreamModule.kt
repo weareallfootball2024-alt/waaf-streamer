@@ -1,4 +1,4 @@
-package expo.modules.waflivestream
+﻿package expo.modules.waflivestream
 
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition

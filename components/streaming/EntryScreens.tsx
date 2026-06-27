@@ -12,10 +12,11 @@ import {
   View,
 } from 'react-native';
 import * as Linking from 'expo-linking';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { parseOperatorToken } from '../../constants/streamPlatforms';
-import { login, restoreSession } from '../../services/authSession';
-import { getStoredVkUserId, loginWithVk } from '../../services/vkAuth';
+import { login } from '../../services/authSession';
+import { loginWithVk } from '../../services/vkAuth';
 import { resolveOperatorToken } from '../../services/operatorFetch';
 import type { TokenType } from '../../services/operatorFetch';
 import { fetchStreamBalance } from '../../services/streamApi';
@@ -24,6 +25,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#121212',
+  },
+  mainContent: {
+    flex: 1,
     padding: 24,
     justifyContent: 'center',
   },
@@ -92,10 +96,17 @@ const styles = StyleSheet.create({
   btnGreen: { backgroundColor: '#166534' },
   btnText: { color: '#fff', fontWeight: '800', fontSize: 14 },
   back: { color: '#e31e24', fontWeight: 'bold', marginBottom: 20 },
-  exitPos: { position: 'absolute', top: 16, right: 16, padding: 8 },
-  exitText: { color: '#666', fontWeight: 'bold', fontSize: 12 },
-  privacyPos: { position: 'absolute', top: 16, left: 16, padding: 8 },
-  privacyText: { color: '#666', fontWeight: 'bold', fontSize: 11 },
+  exitPos: { padding: 10 },
+  exitText: { color: '#ccc', fontWeight: 'bold', fontSize: 13 },
+  privacyPos: { padding: 10 },
+  privacyText: { color: '#ccc', fontWeight: 'bold', fontSize: 12 },
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    zIndex: 100,
+    elevation: 100,
+  },
   stub: {
     backgroundColor: '#292524',
     borderRadius: 10,
@@ -108,12 +119,12 @@ const styles = StyleSheet.create({
 });
 
 type HomeProps = {
-  onAnonymous: () => void;
   onAuth: () => void;
   onDeepLinkToken?: string;
 };
 
-export function MainHomeScreen({ onAnonymous, onAuth, onDeepLinkToken }: HomeProps) {
+export function MainHomeScreen({ onAuth, onDeepLinkToken }: HomeProps) {
+  const insets = useSafeAreaInsets();
   const openPrivacy = () => {
     Linking.openURL('https://мывсефутбол.рф/privacy').catch(() => {});
   };
@@ -128,131 +139,50 @@ export function MainHomeScreen({ onAnonymous, onAuth, onDeepLinkToken }: HomePro
   return (
     <View style={styles.container}>
       <StatusBar hidden />
-      <TouchableOpacity style={styles.privacyPos} onPress={openPrivacy}>
-        <Text style={styles.privacyText}>🔒 ПОЛИТИКА</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={styles.exitPos} onPress={handleExit}>
-        <Text style={styles.exitText}>🚪 ВЫХОД</Text>
-      </TouchableOpacity>
+      <View
+        style={[
+          styles.topBar,
+          {
+            paddingTop: Math.max(insets.top, 8),
+            paddingLeft: Math.max(insets.left, 12),
+            paddingRight: Math.max(insets.right, 12),
+          },
+        ]}
+      >
+        <TouchableOpacity style={styles.privacyPos} onPress={openPrivacy} activeOpacity={0.7}>
+          <Text style={styles.privacyText}>🔒 ПОЛИТИКА</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.exitPos} onPress={handleExit} activeOpacity={0.7}>
+          <Text style={styles.exitText}>🚪 ВЫХОД</Text>
+        </TouchableOpacity>
+      </View>
 
-      <Text style={styles.title}>WAAF-STREAMER</Text>
-      <Text style={styles.subtitle}>
-        Трансляции футбольных матчей{'\n'}
-        <Text style={styles.hashTag}>#МЫВСЕФУТБОЛ</Text>
-      </Text>
-
-      {!!onDeepLinkToken && (
-        <View style={styles.stub}>
-          <Text style={styles.stubText}>Обнаружена ссылка с токеном — войдите в аккаунт или вставьте токен после авторизации.</Text>
-        </View>
-      )}
-
-      <TouchableOpacity style={[styles.card, styles.cardPrimary]} onPress={onAnonymous}>
-        <Text style={styles.cardTitle}>1. Трансляция без авторизации</Text>
-        <Text style={styles.cardDesc}>
-          RTMP + ключ, табло со счётом и логотипами. Минимальное качество, водяной знак #мывсефутбол.
+      <View style={styles.mainContent}>
+        <Text style={styles.title}>WAAF-STREAMER</Text>
+        <Text style={styles.subtitle}>
+          Трансляции футбольных матчей{'\n'}
+          <Text style={styles.hashTag}>#МЫВСЕФУТБОЛ</Text>
         </Text>
-      </TouchableOpacity>
 
-      <TouchableOpacity style={[styles.card, styles.cardSecondary]} onPress={onAuth}>
-        <Text style={styles.cardTitle}>2. Авторизация</Text>
-        <Text style={styles.cardDesc}>
-          VK или МЫВСЕФУТБОЛ — турниры, баланс, качество, повторы, без водяного знака.
+        {!!onDeepLinkToken && (
+          <View style={styles.stub}>
+            <Text style={styles.stubText}>Обнаружена ссылка с токеном — войдите в аккаунт или вставьте токен после авторизации.</Text>
+          </View>
+        )}
+
+        <TouchableOpacity style={[styles.card, styles.cardPrimary]} onPress={onAuth}>
+          <Text style={styles.cardTitle}>Авторизация</Text>
+          <Text style={styles.cardDesc}>
+            МЫВСЕФУТБОЛ, VK и другие провайдеры — турниры, матчи вне платформы, баланс и эфир.
+          </Text>
+        </TouchableOpacity>
+
+        <Text style={styles.hint}>
+          Приложение для стримов — только Android.{'\n'}
+          Сначала войдите, затем выберите турнир или матч вне платформы.
         </Text>
-      </TouchableOpacity>
-
-      <Text style={styles.hint}>
-        Приложение для стримов — только Android.{'\n'}
-        Трансляция в VK Видео (не на стену сообщества).
-      </Text>
+      </View>
     </View>
-  );
-}
-
-type AnonymousProps = {
-  onBack: () => void;
-  onStart: (payload: {
-    rtmpUrl: string;
-    streamKey: string;
-    teamHome: string;
-    teamAway: string;
-  }) => void;
-};
-
-export function AnonymousStreamScreen({ onBack, onStart }: AnonymousProps) {
-  const [rtmpUrl, setRtmpUrl] = useState('');
-  const [streamKey, setStreamKey] = useState('');
-  const [teamHome, setTeamHome] = useState('');
-  const [teamAway, setTeamAway] = useState('');
-
-  const handleStart = () => {
-    if (!rtmpUrl.trim() || !streamKey.trim()) {
-      Alert.alert('Ошибка', 'Укажите RTMP URL и ключ трансляции');
-      return;
-    }
-    if (!teamHome.trim() || !teamAway.trim()) {
-      Alert.alert('Ошибка', 'Укажите названия команд для табло');
-      return;
-    }
-    onStart({
-      rtmpUrl: rtmpUrl.trim(),
-      streamKey: streamKey.trim(),
-      teamHome: teamHome.trim(),
-      teamAway: teamAway.trim(),
-    });
-  };
-
-  return (
-    <ScrollView style={{ flex: 1, backgroundColor: '#121212' }} contentContainerStyle={{ padding: 24, paddingTop: 48 }}>
-      <TouchableOpacity onPress={onBack}>
-        <Text style={styles.back}>◀ НАЗАД</Text>
-      </TouchableOpacity>
-      <Text style={styles.title}>Трансляция вне платформы</Text>
-      <Text style={styles.subtitle}>
-        Укажите RTMP и ключ (VK Видео, YouTube и др.).{'\n'}
-        Настройки качества недоступны — минимальное качество.
-      </Text>
-
-      <TextInput
-        style={styles.input}
-        placeholder="RTMP URL (rtmp://...)"
-        placeholderTextColor="#666"
-        value={rtmpUrl}
-        onChangeText={setRtmpUrl}
-        autoCapitalize="none"
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Ключ трансляции (stream key)"
-        placeholderTextColor="#666"
-        value={streamKey}
-        onChangeText={setStreamKey}
-        autoCapitalize="none"
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Команда хозяев"
-        placeholderTextColor="#666"
-        value={teamHome}
-        onChangeText={setTeamHome}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Команда гостей"
-        placeholderTextColor="#666"
-        value={teamAway}
-        onChangeText={setTeamAway}
-      />
-
-      <TouchableOpacity style={styles.btn} onPress={handleStart}>
-        <Text style={styles.btnText}>НАЧАТЬ ТРАНСЛЯЦИЮ</Text>
-      </TouchableOpacity>
-
-      <Text style={styles.hint}>
-        На углах эфира — водяной знак #мывсефутбол.{'\n'}
-        С авторизацией и оплатой: выбор качества, повторы, без водяного знака.
-      </Text>
-    </ScrollView>
   );
 }
 
@@ -263,22 +193,36 @@ type AuthChoiceProps = {
 };
 
 export function AuthChoiceScreen({ onBack, onVk, onWaaf }: AuthChoiceProps) {
+  const showSoon = (name: string) => {
+    Alert.alert(name, 'Скоро будет доступно');
+  };
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { padding: 24, paddingTop: 48 }]}>
       <TouchableOpacity onPress={onBack}>
         <Text style={styles.back}>◀ НАЗАД</Text>
       </TouchableOpacity>
-      <Text style={styles.title}>Вход</Text>
-      <Text style={styles.subtitle}>Выберите способ авторизации</Text>
-
-      <TouchableOpacity style={[styles.card, styles.cardSecondary]} onPress={onVk}>
-        <Text style={styles.cardTitle}>VK</Text>
-        <Text style={styles.cardDesc}>Для матчей вне платформы и оплаты трансляций</Text>
-      </TouchableOpacity>
+      <Text style={styles.title}>Авторизация</Text>
+      <Text style={styles.subtitle}>Выберите способ входа</Text>
 
       <TouchableOpacity style={[styles.card, styles.cardPrimary]} onPress={onWaaf}>
         <Text style={styles.cardTitle}>МЫВСЕФУТБОЛ</Text>
         <Text style={styles.cardDesc}>Телефон и пароль аккаунта платформы</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={[styles.card, styles.cardSecondary]} onPress={onVk}>
+        <Text style={styles.cardTitle}>VK</Text>
+        <Text style={styles.cardDesc}>Вход через VK ID для трансляций и баланса</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={[styles.card, styles.cardSecondary]} onPress={() => showSoon('Google')}>
+        <Text style={styles.cardTitle}>Google</Text>
+        <Text style={styles.cardDesc}>Скоро</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={[styles.card, styles.cardSecondary]} onPress={() => showSoon('YouTube')}>
+        <Text style={styles.cardTitle}>YouTube</Text>
+        <Text style={styles.cardDesc}>Скоро</Text>
       </TouchableOpacity>
     </View>
   );
@@ -374,13 +318,47 @@ export function WaafLoginScreen({ onBack, onSuccess }: WaafLoginProps) {
   );
 };
 
+export type StandaloneTier = 'free' | 'premium';
+
+type StandaloneTierProps = {
+  onBack: () => void;
+  onSelect: (tier: StandaloneTier) => void;
+  matchPriceRub?: number | null;
+};
+
+export function StandaloneTierScreen({ onBack, onSelect, matchPriceRub }: StandaloneTierProps) {
+  return (
+    <ScrollView style={{ flex: 1, backgroundColor: '#121212' }} contentContainerStyle={{ padding: 24, paddingTop: 48 }}>
+      <TouchableOpacity onPress={onBack}>
+        <Text style={styles.back}>◀ НАЗАД</Text>
+      </TouchableOpacity>
+      <Text style={styles.title}>Вне турнира</Text>
+      <Text style={styles.subtitle}>Выберите тариф трансляции</Text>
+
+      <TouchableOpacity style={[styles.card, styles.cardSecondary]} onPress={() => onSelect('free')}>
+        <Text style={styles.cardTitle}>Бесплатно</Text>
+        <Text style={styles.cardDesc}>
+          Минимальное качество, без повторов. RTMP из настроек VK или вручную URL + ключ.
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={[styles.card, styles.cardPrimary]} onPress={() => onSelect('premium')}>
+        <Text style={styles.cardTitle}>Премиум</Text>
+        <Text style={styles.cardDesc}>
+          Выбор качества, повторы, без водяного знака.
+          {matchPriceRub != null ? `\nСписание ${matchPriceRub} ₽ с баланса за матч.` : ''}
+        </Text>
+      </TouchableOpacity>
+    </ScrollView>
+  );
+}
+
 type AuthHomeProps = {
   initialToken?: string;
   onBack: () => void;
   onOpenSettings: () => void;
   onTokenResolved: (tournamentId: string, token: string, tokenType: TokenType) => void;
-  onStandalone: () => void;
-  onVkRequired: () => void;
+  onOutsideTournament: () => void;
 };
 
 export function AuthenticatedHomeScreen({
@@ -388,8 +366,7 @@ export function AuthenticatedHomeScreen({
   onBack,
   onOpenSettings,
   onTokenResolved,
-  onStandalone,
-  onVkRequired,
+  onOutsideTournament,
 }: AuthHomeProps) {
   const [tokenInput, setTokenInput] = useState(initialToken);
   const [loading, setLoading] = useState(false);
@@ -436,19 +413,6 @@ export function AuthenticatedHomeScreen({
     }
   };
 
-  const handleStandalone = async () => {
-    const vk = await getStoredVkUserId();
-    const user = await restoreSession();
-    if (!vk && !user) {
-      Alert.alert('Нужна авторизация', 'Войдите через VK в настройках или привяжите аккаунт WAAF', [
-        { text: 'В настройки', onPress: onOpenSettings },
-        { text: 'OK', style: 'cancel' },
-      ]);
-      return;
-    }
-    onStandalone();
-  };
-
   return (
     <ScrollView style={{ flex: 1, backgroundColor: '#121212' }} contentContainerStyle={{ padding: 24, paddingTop: 48 }}>
       <TouchableOpacity onPress={onBack}>
@@ -459,7 +423,7 @@ export function AuthenticatedHomeScreen({
       </TouchableOpacity>
 
       <Text style={styles.title}>Личный кабинет</Text>
-      <Text style={styles.subtitle}>Токен турнира или матч вне платформы</Text>
+      <Text style={styles.subtitle}>Токен турнира или матч вне турнира</Text>
 
       {balanceRub != null && (
         <View style={styles.balanceCard}>
@@ -488,17 +452,12 @@ export function AuthenticatedHomeScreen({
         Токен веб-пульта — только табло, без камеры.
       </Text>
 
-      <TouchableOpacity style={[styles.btn, styles.btnGreen, { marginTop: 24 }]} onPress={handleStandalone}>
-        <Text style={styles.btnText}>МАТЧ ВНЕ ПЛАТФОРМЫ МЫВСЕФУТБОЛ</Text>
+      <TouchableOpacity style={[styles.card, styles.cardSecondary, { marginTop: 24 }]} onPress={onOutsideTournament}>
+        <Text style={styles.cardTitle}>Вне турнира</Text>
+        <Text style={styles.cardDesc}>
+          Быстрый матч без турнира: бесплатный тариф или премиум с балансом.
+        </Text>
       </TouchableOpacity>
-      <Text style={styles.hint}>
-        Пополнение баланса, списание за трансляцию после матча.{'\n'}
-        Эфир в VK Видео.
-      </Text>
-
-      <View style={styles.stub}>
-        <Text style={styles.stubText}>ID турнира + PIN — скоро (заглушка)</Text>
-      </View>
     </ScrollView>
   );
 }

@@ -1,4 +1,4 @@
-package expo.modules.waflivestream
+﻿package expo.modules.waflivestream
 
 import android.content.Context
 import android.content.res.Configuration
@@ -36,7 +36,6 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
 
   private val surfaceView = SurfaceView(context)
   private val microphoneSource = MicrophoneSource()
-  private var camera2Source = Camera2Source(context)
   private var scoreboardFilter: ImageObjectFilterRender? = null
   private var eventFilter: ImageObjectFilterRender? = null
   private var eventFilterAdded = false
@@ -120,27 +119,26 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     override fun onAuthSuccess() {}
   }
 
-  private lateinit var genericStream: GenericStream
-  private lateinit var videoInjector: VideoInjector
   private val replayRingBuffer = ReplayRingBuffer()
   private val replayExecutor = Executors.newSingleThreadExecutor()
+  private lateinit var videoInjector: VideoInjector
+
+  private val genericStream: GenericStream = GenericStream(
+    context,
+    connectChecker,
+    Camera2Source(context),
+    microphoneSource,
+  ).apply {
+    setRecordController(ReplayCaptureRecordController(replayRingBuffer))
+    getGlInterface().autoHandleOrientation = true
+    getStreamClient().apply {
+      setReTries(3)
+      setDelay(0)
+      setWriteChunkSize(4096)
+    }
+  }
 
   init {
-    genericStream = GenericStream(
-      context,
-      connectChecker,
-      camera2Source,
-      microphoneSource,
-    ).apply {
-      setRecordController(ReplayCaptureRecordController(replayRingBuffer))
-      getGlInterface().autoHandleOrientation = true
-      getStreamClient().apply {
-        setReTries(3)
-        setDelay(0)
-        setWriteChunkSize(4096)
-      }
-    }
-
     videoInjector = VideoInjector(
       context,
       genericStream,
@@ -172,10 +170,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
 
         override fun setMicMuted(muted: Boolean) = setMicrophoneMuted(muted)
 
-        override fun createCameraSource(): Camera2Source {
-          camera2Source = Camera2Source(context)
-          return camera2Source
-        }
+        override fun createCameraSource(): Camera2Source = Camera2Source(context)
       },
     )
 
@@ -188,21 +183,13 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
       override fun surfaceCreated(holder: SurfaceHolder) {
         if (!genericStream.isOnPreview) {
-          try {
-            if (!isPrepared) prepareEncoder(encoderQuality)
-            genericStream.startPreview(surfaceView)
-          } catch (e: Exception) {
-            Log.e(TAG, "surfaceCreated preview failed", e)
-          }
+          if (!isPrepared) prepareEncoder(encoderQuality)
+          genericStream.startPreview(surfaceView)
         }
       }
 
       override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        try {
-          genericStream.getGlInterface().setPreviewResolution(width, height)
-        } catch (e: Exception) {
-          Log.w(TAG, "setPreviewResolution failed", e)
-        }
+        genericStream.getGlInterface().setPreviewResolution(width, height)
       }
 
       override fun surfaceDestroyed(holder: SurfaceHolder) {
@@ -233,8 +220,6 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   fun stopVideoInsert() {
     videoInjector.stop()
   }
-
-  fun isVideoInsertActive(): Boolean = videoInjector.isActive
 
   fun triggerReplay(seconds: Int) {
     if (!genericStream.isStreaming) {
@@ -396,27 +381,10 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     Log.i(TAG, "Start stream → ${maskEndpoint(endpoint)} muted=$muted")
 
     val delayMs = if (genericStream.isOnPreview) 1200L else 2000L
-    schedulePreviewAndPublish(delayMs, 0)
-  }
-
-  private fun schedulePreviewAndPublish(delayMs: Long, attempt: Int) {
     if (!genericStream.isOnPreview) {
-      if (!isPrepared) prepareEncoder(encoderQuality)
-      try {
-        genericStream.startPreview(surfaceView)
-      } catch (e: Exception) {
-        Log.w(TAG, "startPreview attempt $attempt failed", e)
-      }
+      genericStream.startPreview(surfaceView)
     }
-    if (genericStream.isOnPreview) {
-      mainHandler.postDelayed(publishRunnable, delayMs)
-      return
-    }
-    if (attempt < 6) {
-      mainHandler.postDelayed({ schedulePreviewAndPublish(delayMs, attempt + 1) }, 400)
-      return
-    }
-    onConnectionFailed(mapOf("code" to "preview_failed"))
+    mainHandler.postDelayed(publishRunnable, delayMs)
   }
 
   private fun publishStream() {

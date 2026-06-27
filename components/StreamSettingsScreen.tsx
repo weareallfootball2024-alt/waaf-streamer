@@ -4,18 +4,20 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   DEFAULT_STREAM_SETTINGS,
   PLATFORM_LABELS,
+  REPLAY_SECONDS_OPTIONS,
   STUB_PLATFORMS,
   STREAM_QUALITY_HINTS,
   STREAM_QUALITY_LABELS,
@@ -53,6 +55,7 @@ function formatGroupsError(msg: string): string {
 }
 
 export function StreamSettingsScreen({ onClose }: Props) {
+  const insets = useSafeAreaInsets();
   const [settings, setSettings] = useState<StreamSettings>({ ...DEFAULT_STREAM_SETTINGS });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -345,19 +348,20 @@ export function StreamSettingsScreen({ onClose }: Props) {
   const vk = settings.vk;
   const hasCommunity = !!vk.communityId;
 
+  const footerPad = Math.max(insets.bottom, 12);
+  const sidePad = Math.max(insets.left, insets.right, 16);
+
   return (
-    <SafeAreaView style={styles.root}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-          <Text style={styles.back}>← НАЗАД</Text>
-        </TouchableOpacity>
+    <View style={styles.root}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top, 8), paddingHorizontal: sidePad }]}>
         <Text style={styles.title}>НАСТРОЙКИ ТРАНСЛЯЦИИ</Text>
-        <TouchableOpacity onPress={handleSave} disabled={saving} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-          {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.save}>СОХРАНИТЬ</Text>}
-        </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[styles.scrollContent, { paddingHorizontal: sidePad, paddingBottom: 16 }]}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={styles.sectionTitle}>Качество трансляции</Text>
         <View style={styles.platformRow}>
           {(['high', 'medium', 'low', 'auto'] as StreamQuality[]).map((q) => {
@@ -376,6 +380,45 @@ export function StreamSettingsScreen({ onClose }: Props) {
           })}
         </View>
         <Text style={styles.hint}>{STREAM_QUALITY_HINTS[settings.streamQuality]}</Text>
+
+        <Text style={styles.sectionTitle}>Повтор в эфире</Text>
+        <View style={styles.block}>
+          <View style={styles.switchRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.blockTitle}>Повтор</Text>
+              <Text style={styles.hint}>
+                Кнопка «ПОВТОР» на пульте — вставляет в трансляцию последние секунды с камеры.
+              </Text>
+            </View>
+            <Switch
+              value={settings.replayEnabled}
+              onValueChange={(replayEnabled) => setSettings((prev) => ({ ...prev, replayEnabled }))}
+              trackColor={{ false: '#444', true: '#1a4384' }}
+              thumbColor={settings.replayEnabled ? '#4cd964' : '#ccc'}
+            />
+          </View>
+          {settings.replayEnabled && (
+            <>
+              <Text style={[styles.hint, { marginTop: 4 }]}>Длительность клипа (до 15 сек):</Text>
+              <View style={styles.platformRow}>
+                {REPLAY_SECONDS_OPTIONS.map((sec) => {
+                  const active = settings.replaySeconds === sec;
+                  return (
+                    <TouchableOpacity
+                      key={sec}
+                      style={[styles.platformChip, active && styles.platformChipActive]}
+                      onPress={() => setSettings((prev) => ({ ...prev, replaySeconds: sec }))}
+                    >
+                      <Text style={[styles.platformChipText, active && styles.platformChipTextActive]}>
+                        {sec} сек
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </>
+          )}
+        </View>
 
         <Text style={styles.sectionTitle}>Ролики для эфира</Text>
         <View style={styles.block}>
@@ -685,7 +728,25 @@ export function StreamSettingsScreen({ onClose }: Props) {
           </View>
         )}
       </ScrollView>
-    </SafeAreaView>
+
+      <View style={[styles.footer, { paddingBottom: footerPad, paddingHorizontal: sidePad }]}>
+        <TouchableOpacity style={styles.footerBtnBack} onPress={onClose} activeOpacity={0.8}>
+          <Text style={styles.footerBtnBackText}>← НАЗАД</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.footerBtnSave, saving && styles.footerBtnDisabled]}
+          onPress={handleSave}
+          disabled={saving}
+          activeOpacity={0.8}
+        >
+          {saving ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.footerBtnSaveText}>СОХРАНИТЬ</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
 
@@ -693,22 +754,45 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#121212' },
   center: { flex: 1, backgroundColor: '#121212', justifyContent: 'center', alignItems: 'center' },
   header: {
-    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    justifyContent: 'center',
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#333',
-    zIndex: 10,
-    elevation: 10,
     backgroundColor: '#121212',
   },
-  back: { color: '#e31e24', fontWeight: 'bold', fontSize: 14 },
-  title: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-  save: { color: '#4cd964', fontWeight: 'bold', fontSize: 14 },
+  title: { color: '#fff', fontWeight: 'bold', fontSize: 16, textAlign: 'center' },
+  footer: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#333',
+    backgroundColor: '#121212',
+  },
+  footerBtnBack: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#555',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2a2a2a',
+  },
+  footerBtnBackText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
+  footerBtnSave: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2d6a2d',
+  },
+  footerBtnDisabled: { opacity: 0.6 },
+  footerBtnSaveText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
   scroll: { flex: 1 },
-  scrollContent: { padding: 16, paddingBottom: 40 },
+  scrollContent: { paddingTop: 16 },
   sectionTitle: { color: '#aaa', fontSize: 13, marginBottom: 10, fontWeight: '600' },
   platformRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
   platformChip: {
@@ -753,6 +837,7 @@ const styles = StyleSheet.create({
   },
   btnApplyText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
   vkRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 4 },
   linkOut: { color: '#e31e24', fontSize: 13 },
   empty: { color: '#666', fontStyle: 'italic', marginBottom: 8 },
   groupRow: {

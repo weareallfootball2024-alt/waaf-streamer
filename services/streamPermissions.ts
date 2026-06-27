@@ -1,30 +1,33 @@
-import { Camera } from 'expo-camera';
-import { Linking, Platform } from 'react-native';
+import { Linking, PermissionsAndroid, Platform } from 'react-native';
 
 export type StreamPermissionState = 'unknown' | 'granted' | 'denied' | 'blocked';
 
+async function androidPermissionsGranted(): Promise<boolean> {
+  const cam = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.CAMERA);
+  const mic = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
+  return cam && mic;
+}
+
 export async function getStreamPermissionState(): Promise<StreamPermissionState> {
   if (Platform.OS !== 'android') return 'granted';
-
-  const [cam, mic] = await Promise.all([
-    Camera.getCameraPermissionsAsync(),
-    Camera.getMicrophonePermissionsAsync(),
-  ]);
-
-  if (cam.granted && mic.granted) return 'granted';
-  if (!cam.canAskAgain && !mic.canAskAgain) return 'blocked';
-  if (cam.status === 'undetermined' || mic.status === 'undetermined') return 'unknown';
-  return 'denied';
+  if (await androidPermissionsGranted()) return 'granted';
+  return 'unknown';
 }
 
 export async function requestStreamPermissions(): Promise<boolean> {
   if (Platform.OS !== 'android') return true;
 
-  const cam = await Camera.requestCameraPermissionsAsync();
-  if (!cam.granted) return false;
+  if (await androidPermissionsGranted()) return true;
 
-  const mic = await Camera.requestMicrophonePermissionsAsync();
-  return mic.granted;
+  const granted = await PermissionsAndroid.requestMultiple([
+    PermissionsAndroid.PERMISSIONS.CAMERA,
+    PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+  ]);
+
+  return (
+    granted[PermissionsAndroid.PERMISSIONS.CAMERA] === PermissionsAndroid.RESULTS.GRANTED &&
+    granted[PermissionsAndroid.PERMISSIONS.RECORD_AUDIO] === PermissionsAndroid.RESULTS.GRANTED
+  );
 }
 
 export function openAppSettings(): void {

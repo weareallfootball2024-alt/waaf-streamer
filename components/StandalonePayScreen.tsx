@@ -27,7 +27,7 @@ type Props = {
   onOpenSettings: () => void;
 };
 
-const TOPUP_PRESETS = [500, 1000, 2000];
+const TOPUP_PRESETS = [100, 200, 300, 500, 1000];
 
 export function StandalonePayScreen({
   matchContext,

@@ -28,6 +28,12 @@ function normalizeVkConfig(vk: Partial<VkPlatformConfig> | undefined): VkPlatfor
   return base;
 }
 
+function normalizeReplaySeconds(value: unknown): number {
+  const n = typeof value === 'number' ? value : parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(n)) return DEFAULT_STREAM_SETTINGS.replaySeconds;
+  return Math.min(15, Math.max(1, Math.round(n)));
+}
+
 export async function loadStreamSettings(): Promise<StreamSettings> {
   await hydratePlaylistSessionRtmp();
   try {
@@ -38,6 +44,8 @@ export async function loadStreamSettings(): Promise<StreamSettings> {
       ...DEFAULT_STREAM_SETTINGS,
       ...parsed,
       streamQuality: normalizeStreamQuality(parsed.streamQuality),
+      replayEnabled: parsed.replayEnabled !== false,
+      replaySeconds: normalizeReplaySeconds(parsed.replaySeconds),
       adClips: Array.isArray(parsed.adClips) ? parsed.adClips.slice(0, 3) : [],
       vk: normalizeVkConfig(parsed.vk),
       youtube: { ...DEFAULT_STREAM_SETTINGS.youtube, ...parsed.youtube },
@@ -64,7 +72,17 @@ export async function saveStreamSettings(settings: StreamSettings): Promise<void
 export function getActiveRtmpConfig(
   settings: StreamSettings,
   _matchId?: number | null,
+  manualRtmp?: { rtmpUrl: string; streamKey: string } | null,
 ): { rtmpUrl: string; streamKey: string; platform: StreamPlatform } | null {
+  if (manualRtmp?.rtmpUrl?.trim() && manualRtmp?.streamKey?.trim()) {
+    const url = manualRtmp.rtmpUrl.trim();
+    return {
+      rtmpUrl: url.endsWith('/') ? url : `${url}/`,
+      streamKey: manualRtmp.streamKey.trim(),
+      platform: settings.activePlatform,
+    };
+  }
+
   const platform = settings.activePlatform;
   const cfg = settings[platform];
   if (!cfg?.enabled) return null;

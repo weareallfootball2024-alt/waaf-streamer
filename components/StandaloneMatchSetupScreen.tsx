@@ -4,7 +4,6 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,12 +11,13 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   searchPublicClubs,
-  type AnonymousMatchContext,
   type PublicClub,
   type StandaloneMatchContext,
+  type StandaloneTier,
 } from '../services/standaloneMatch';
 
 type TeamSlot = {
@@ -39,10 +39,10 @@ const emptySlot = (): TeamSlot => ({
 });
 
 type Props = {
-  onStart: (ctx: StandaloneMatchContext | AnonymousMatchContext) => void | Promise<void>;
+  onStart: (ctx: StandaloneMatchContext) => void | Promise<void>;
   onBack: () => void;
   onOpenSettings?: () => void;
-  anonymousMode?: boolean;
+  standaloneTier?: StandaloneTier;
 };
 
 function teamDisplayName(slot: TeamSlot): string {
@@ -184,17 +184,18 @@ function TeamPicker({
   );
 }
 
-export function StandaloneMatchSetupScreen({ onStart, onBack, onOpenSettings, anonymousMode = false }: Props) {
+export function StandaloneMatchSetupScreen({ onStart, onBack, onOpenSettings, standaloneTier = 'premium' }: Props) {
+  const insets = useSafeAreaInsets();
   const [home, setHome] = useState<TeamSlot>(emptySlot);
   const [away, setAway] = useState<TeamSlot>(emptySlot);
   const [rtmpUrl, setRtmpUrl] = useState('');
   const [streamKey, setStreamKey] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const isFreeTier = standaloneTier === 'free';
 
   const homeName = teamDisplayName(home);
   const awayName = teamDisplayName(away);
-  const rtmpReady = !anonymousMode || (rtmpUrl.trim().length > 0 && streamKey.trim().length > 0);
-  const canStart = homeName.length > 0 && awayName.length > 0 && rtmpReady && !submitting;
+  const canStart = homeName.length > 0 && awayName.length > 0 && !submitting;
 
   const preview = useMemo(
     () => ({
@@ -208,14 +209,11 @@ export function StandaloneMatchSetupScreen({ onStart, onBack, onOpenSettings, an
 
   const handleStart = async () => {
     if (!canStart) return;
-    if (anonymousMode && (!rtmpUrl.trim() || !streamKey.trim())) {
-      Alert.alert('RTMP', 'Укажите RTMP URL и ключ трансляции');
-      return;
-    }
     setSubmitting(true);
     try {
       const base: StandaloneMatchContext = {
         standalone: true,
+        tier: standaloneTier,
         clubId: home.selected?.id,
         clubName: homeName,
         clubLogoUri: teamLogo(home),
@@ -224,7 +222,7 @@ export function StandaloneMatchSetupScreen({ onStart, onBack, onOpenSettings, an
         awayClubId: away.selected?.id,
         awayLogoUri: teamLogo(away) || undefined,
       };
-      if (anonymousMode) {
+      if (isFreeTier && rtmpUrl.trim() && streamKey.trim()) {
         await onStart({
           ...base,
           rtmpUrl: rtmpUrl.trim(),
@@ -238,28 +236,33 @@ export function StandaloneMatchSetupScreen({ onStart, onBack, onOpenSettings, an
     }
   };
 
+  const sidePad = Math.max(insets.left, insets.right, 16);
+  const footerPad = Math.max(insets.bottom, 12);
+
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
-          <Text style={styles.backText}>НАЗАД</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>{anonymousMode ? 'Быстрый матч' : 'Быстрый матч'}</Text>
-        {onOpenSettings ? (
-          <TouchableOpacity onPress={onOpenSettings}>
-            <Text style={styles.settingsBtn}>⚙</Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={{ width: 36 }} />
-        )}
+    <View style={styles.container}>
+      <View
+        style={[
+          styles.header,
+          {
+            paddingTop: Math.max(insets.top, 8),
+            paddingHorizontal: sidePad,
+          },
+        ]}
+      >
+        <Text style={styles.headerTitle}>Быстрый матч</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll}>
-        {anonymousMode && (
+      <ScrollView
+        style={styles.scrollFlex}
+        contentContainerStyle={[styles.scroll, { paddingHorizontal: sidePad, paddingBottom: 16 }]}
+        keyboardShouldPersistTaps="handled"
+      >
+        {isFreeTier && (
           <View style={styles.rtmpBlock}>
             <Text style={styles.rtmpTitle}>RTMP трансляция</Text>
             <Text style={styles.rtmpHint}>
-              Укажите сервер и ключ (VK Видео, YouTube и др.). Минимальное качество, водяной знак #мывсефутбол.
+              VK из настроек или укажите URL и ключ вручную. Минимальное качество, без повторов.
             </Text>
             <TextInput
               style={styles.input}
@@ -318,38 +321,89 @@ export function StandaloneMatchSetupScreen({ onStart, onBack, onOpenSettings, an
           />
         </View>
 
+      </ScrollView>
+
+      <View
+        style={[
+          styles.footerBar,
+          { paddingBottom: footerPad, paddingHorizontal: sidePad, paddingTop: 12 },
+        ]}
+      >
+        <TouchableOpacity style={styles.footerBtnBack} onPress={onBack} activeOpacity={0.7}>
+          <Text style={styles.backText}>← НАЗАД</Text>
+        </TouchableOpacity>
+        {onOpenSettings ? (
+          <TouchableOpacity style={styles.footerBtnSettings} onPress={onOpenSettings} activeOpacity={0.7}>
+            <Text style={styles.settingsBtn}>⚙ НАСТРОЙКИ</Text>
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity
-          style={[styles.btnStart, !canStart && styles.btnStartDisabled]}
+          style={[styles.footerBtnStart, !canStart && styles.btnStartDisabled]}
           onPress={handleStart}
           disabled={!canStart}
+          activeOpacity={0.7}
         >
           {submitting ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.btnStartText}>▶ НАЧАТЬ ТРАНСЛЯЦИЮ</Text>
+            <Text style={styles.btnStartText}>▶ СТАРТ</Text>
           )}
         </TouchableOpacity>
-      </ScrollView>
-    </SafeAreaView>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0d0d0d' },
+  scrollFlex: { flex: 1 },
   header: {
-    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    justifyContent: 'center',
     paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#222',
+    backgroundColor: '#0d0d0d',
   },
-  backBtn: { padding: 8 },
-  backText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
-  headerTitle: { color: '#fff', fontSize: 18, fontWeight: '900' },
-  settingsBtn: { color: '#4cd964', fontSize: 20, padding: 8 },
-  scroll: { padding: 16, paddingBottom: 40 },
+  backText: { color: '#fff', fontWeight: 'bold', fontSize: 13 },
+  headerTitle: { color: '#fff', fontSize: 16, fontWeight: '900' },
+  settingsBtn: { color: '#4cd964', fontWeight: 'bold', fontSize: 12 },
+  footerBar: {
+    flexDirection: 'row',
+    gap: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#222',
+    backgroundColor: '#0d0d0d',
+  },
+  footerBtnBack: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#555',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2a2a2a',
+  },
+  footerBtnSettings: {
+    minHeight: 48,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#1a4384',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1a2a4a',
+  },
+  footerBtnStart: {
+    flex: 1.4,
+    minHeight: 48,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#e31e24',
+  },
+  scroll: { paddingTop: 8, paddingBottom: 16 },
   rtmpBlock: {
     backgroundColor: '#141414',
     borderRadius: 12,
