@@ -129,12 +129,23 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     Camera2Source(context),
     microphoneSource,
   ).apply {
-    setRecordController(ReplayCaptureRecordController(replayRingBuffer))
     getGlInterface().autoHandleOrientation = true
     getStreamClient().apply {
       setReTries(3)
       setDelay(0)
       setWriteChunkSize(4096)
+    }
+  }
+
+  private var replayControllerAttached = false
+
+  private fun attachReplayControllerIfNeeded() {
+    if (replayControllerAttached) return
+    try {
+      genericStream.setRecordController(ReplayCaptureRecordController(replayRingBuffer))
+      replayControllerAttached = true
+    } catch (e: Exception) {
+      Log.e(TAG, "replay controller attach failed", e)
     }
   }
 
@@ -182,9 +193,17 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
 
     surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
       override fun surfaceCreated(holder: SurfaceHolder) {
-        if (!genericStream.isOnPreview) {
-          if (!isPrepared) prepareEncoder(encoderQuality)
-          genericStream.startPreview(surfaceView)
+        try {
+          if (!genericStream.isOnPreview) {
+            if (!isPrepared) prepareEncoder(encoderQuality)
+            if (isPrepared) {
+              genericStream.startPreview(surfaceView)
+            } else {
+              Log.e(TAG, "surfaceCreated: encoder not prepared")
+            }
+          }
+        } catch (e: Exception) {
+          Log.e(TAG, "surfaceCreated failed", e)
         }
       }
 
@@ -275,10 +294,11 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
 
     encoderQuality = quality
     val rotation = videoRotation()
+    attachReplayControllerIfNeeded()
     isPrepared = try {
       genericStream.prepareVideo(quality.width, quality.height, quality.bitrate, quality.fps, 1, rotation)
         && genericStream.prepareAudio(44_100, true, 128_000)
-    } catch (e: IllegalArgumentException) {
+    } catch (e: Exception) {
       Log.e(TAG, "prepareEncoder failed", e)
       false
     }
@@ -295,7 +315,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     if (preset == encoderQuality && isPrepared) return
     if (genericStream.isStreaming) return
     prepareEncoder(preset)
-    if (!genericStream.isOnPreview) {
+    if (!genericStream.isOnPreview && surfaceView.holder.surface?.isValid == true && isPrepared) {
       try {
         genericStream.startPreview(surfaceView)
       } catch (e: Exception) {
@@ -381,8 +401,14 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     Log.i(TAG, "Start stream → ${maskEndpoint(endpoint)} muted=$muted")
 
     val delayMs = if (genericStream.isOnPreview) 1200L else 2000L
-    if (!genericStream.isOnPreview) {
-      genericStream.startPreview(surfaceView)
+    if (!genericStream.isOnPreview && surfaceView.holder.surface?.isValid == true) {
+      try {
+        genericStream.startPreview(surfaceView)
+      } catch (e: Exception) {
+        Log.e(TAG, "startPreview before stream failed", e)
+        onConnectionFailed(mapOf("code" to "preview_failed"))
+        return
+      }
     }
     mainHandler.postDelayed(publishRunnable, delayMs)
   }

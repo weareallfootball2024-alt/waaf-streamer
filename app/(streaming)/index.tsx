@@ -865,6 +865,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   const [isStreaming, setIsStreaming] = useState(false); 
   const [isLoading, setIsLoading] = useState(false);
   const [permissionGranted, setPermissionGranted] = useState(false);
+  const [permissionsChecked, setPermissionsChecked] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
 
   // Состояния игры
@@ -904,18 +905,24 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
 
   useEffect(() => {
     const initPermissions = async () => {
-      if (!canStream) return;
+      if (!canStream) {
+        setPermissionsChecked(true);
+        return;
+      }
       if (Platform.OS !== 'android') {
         setPermissionGranted(true);
+        setPermissionsChecked(true);
         return;
       }
       const state = await getStreamPermissionState();
       if (state === 'granted') {
         setPermissionGranted(true);
+        setPermissionsChecked(true);
         return;
       }
       const ok = await requestStreamPermissions();
       setPermissionGranted(ok);
+      setPermissionsChecked(true);
     };
     initPermissions();
   }, [canStream]);
@@ -1206,10 +1213,17 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             console.error('[stream] start failed', e);
             setIsStreaming(false);
             const msg = typeof e?.message === 'string' ? e.message : String(e ?? '');
-            Alert.alert(
-              'Ошибка запуска',
-              msg || 'Не удалось начать стрим. Проверьте RTMP URL и ключ в настройках VK Studio.',
-            );
+            if (msg.includes('ErrorGroupView') || msg.includes('WaafLivestreamView')) {
+              Alert.alert(
+                'Камера не запустилась',
+                'Модуль камеры упал при загрузке. Закройте другие приложения с камерой, проверьте разрешения и перезайдите в матч.',
+              );
+            } else {
+              Alert.alert(
+                'Ошибка запуска',
+                msg || 'Не удалось начать стрим. Проверьте RTMP URL и ключ в настройках VK Studio.',
+              );
+            }
         } finally {
             if (!waitingConnection) setIsLoading(false);
         }
@@ -1608,7 +1622,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     <View style={styles.container}>
       <StatusBar hidden />
       <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          {canStream ? (
+          {canStream && permissionGranted ? (
             <WaafLivestreamView
                 ref={videoRef}
                 style={{ flex: 1 }}
@@ -1678,6 +1692,19 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                   );
                 }}
             />
+          ) : canStream && permissionsChecked && !permissionGranted ? (
+            <View style={{ flex: 1, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+              <Text style={{ color: '#fff', fontSize: 14, fontWeight: 'bold', textAlign: 'center', marginBottom: 12 }}>
+                Нужны камера и микрофон
+              </Text>
+              <Text style={{ color: '#9ca3af', fontSize: 12, textAlign: 'center' }}>
+                Разрешите доступ в настройках Android, затем вернитесь в приложение.
+              </Text>
+            </View>
+          ) : canStream && !permissionsChecked ? (
+            <View style={{ flex: 1, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center' }}>
+              <ActivityIndicator color="#e31e24" />
+            </View>
           ) : (
             <View style={{flex: 1, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center'}}>
                  <Text style={{color: '#333333', fontSize: 16, fontWeight: 'bold', textTransform: 'uppercase'}}>Эфир отключен организатором</Text>
