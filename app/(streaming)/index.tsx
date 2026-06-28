@@ -343,10 +343,25 @@ export default function App() {
   const [isStandaloneSession, setIsStandaloneSession] = useState(false);
   const [pendingStandaloneCtx, setPendingStandaloneCtx] = useState<StandaloneMatchContext | null>(null);
   const [standaloneAccess, setStandaloneAccess] = useState<StreamAccess | null>(null);
+  const [waafLoginReturn, setWaafLoginReturn] = useState('auth_choice');
 
   const openSettings = (returnTo = 'home') => {
       setSettingsReturnScreen(returnTo);
       setCurrentScreen('settings');
+  };
+
+  const promptWaafLogin = (message: string, returnTo = 'step_standalone_club') => {
+      Alert.alert('Вход WAAF', message, [
+          {
+              text: 'Войти WAAF',
+              onPress: () => {
+                  setWaafLoginReturn(returnTo);
+                  setCurrentScreen('waaf_login');
+              },
+          },
+          { text: 'Настройки', onPress: () => openSettings(returnTo) },
+          { text: 'OK', style: 'cancel' },
+      ]);
   };
 
   useEffect(() => {
@@ -560,13 +575,8 @@ export default function App() {
           const access = await fetchStreamAccess();
           if (!access.can_stream_standalone) {
               if (access.needs_auth || access.needs_waaf_login) {
-                  Alert.alert(
-                      access.needs_waaf_login ? 'Вход WAAF' : 'Нужна авторизация',
-                      access.reason || 'Откройте настройки трансляции',
-                      [
-                          { text: 'В настройки', onPress: () => openSettings('step_standalone_club') },
-                          { text: 'OK', style: 'cancel' },
-                      ],
+                  promptWaafLogin(
+                      access.reason || 'Войдите в аккаунт WAAF (телефон и пароль) или через VK в настройках.',
                   );
                   return;
               }
@@ -582,7 +592,12 @@ export default function App() {
           const data = await createStandaloneLiveMatch(ctx);
           await enterStandaloneControl(data, ctx);
       } catch (e: unknown) {
-          Alert.alert('Ошибка', e instanceof Error ? e.message : 'Не удалось создать матч');
+          const msg = e instanceof Error ? e.message : 'Не удалось создать матч';
+          if (/WAAF|waaf|телефон и пароль/i.test(msg)) {
+              promptWaafLogin(msg);
+              return;
+          }
+          Alert.alert('Ошибка', msg);
       }
   };
 
@@ -631,8 +646,8 @@ export default function App() {
   if (currentScreen === 'waaf_login') {
       return (
           <WaafLoginScreen
-              onBack={() => setCurrentScreen('auth_choice')}
-              onSuccess={() => setCurrentScreen('auth_home')}
+              onBack={() => setCurrentScreen(waafLoginReturn)}
+              onSuccess={() => setCurrentScreen(waafLoginReturn)}
           />
       );
   }
