@@ -1,4 +1,4 @@
-﻿package expo.modules.waflivestream
+package expo.modules.waflivestream
 
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -27,8 +27,8 @@ class WaafLivestreamModule : Module() {
         view.setStreamQuality(quality)
       }
 
-      AsyncFunction("startStreaming") { view: WaafLivestreamView, streamKey: String, rtmpUrl: String, muted: Boolean?, quality: String? ->
-        view.startStreaming(rtmpUrl, streamKey, muted ?: false, quality)
+      AsyncFunction("startStreaming") { view: WaafLivestreamView, streamKey: String, rtmpUrl: String, muted: Boolean?, quality: String?, captureReplay: Boolean? ->
+        view.startStreaming(rtmpUrl, streamKey, muted ?: false, quality, captureReplay ?: false)
       }
 
       AsyncFunction("stopStreaming") { view: WaafLivestreamView ->

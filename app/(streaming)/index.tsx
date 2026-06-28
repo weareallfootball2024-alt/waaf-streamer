@@ -429,6 +429,18 @@ export default function App() {
   const [matchAccessCode, setMatchAccessCode] = useState<string | null>(null);
   const [matchSessionToken, setMatchSessionToken] = useState<string | null>(null);
 
+  const goToControlScreen = async () => {
+      const ok = await requestStreamPermissions();
+      if (!ok) {
+          Alert.alert(
+              'Нужна камера',
+              'Разрешите доступ к камере и микрофону — без этого трансляция невозможна.',
+          );
+          return;
+      }
+      setCurrentScreen('control');
+  };
+
   const enterMatch = async (match, accessCode: string | null, sessionToken: string | null) => {
       if (accessCode) setMatchAccessCode(accessCode);
       if (sessionToken) setMatchSessionToken(sessionToken);
@@ -436,7 +448,7 @@ export default function App() {
           const roster = await loadEffectiveMatchRoster(match);
           setMatchRoster(roster);
           if (roster.length > 0) {
-              setCurrentScreen('control');
+              await goToControlScreen();
           } else {
               setCurrentScreen('roster');
           }
@@ -457,9 +469,9 @@ export default function App() {
       await enterMatch(match, accessCode, sessionToken);
   };
 
-  const handleRosterSaved = (newRoster) => {
+  const handleRosterSaved = async (newRoster) => {
       setMatchRoster(newRoster);
-      setCurrentScreen('control');
+      await goToControlScreen();
   };
 
   const handleBackToStart = () => {
@@ -500,7 +512,7 @@ export default function App() {
       setCurrentScreen('step_standalone_club');
   };
 
-  const enterStandaloneControl = (
+  const enterStandaloneControl = async (
       data: Awaited<ReturnType<typeof createStandaloneLiveMatch>>,
       ctx?: StandaloneMatchContext,
   ) => {
@@ -522,7 +534,7 @@ export default function App() {
       setMatchSessionToken(data.sessionToken);
       setPendingStandaloneCtx(null);
       setStandaloneAccess(null);
-      setCurrentScreen('control');
+      await goToControlScreen();
   };
 
   const startStandaloneMatch = async (ctx: StandaloneMatchContext) => {
@@ -541,7 +553,7 @@ export default function App() {
                   await saveStreamSettings(settings);
               }
               const data = await createStandaloneLiveMatch(ctx);
-              enterStandaloneControl(data, ctx);
+              await enterStandaloneControl(data, ctx);
               return;
           }
 
@@ -568,7 +580,7 @@ export default function App() {
               return;
           }
           const data = await createStandaloneLiveMatch(ctx);
-          enterStandaloneControl(data, ctx);
+          await enterStandaloneControl(data, ctx);
       } catch (e: unknown) {
           Alert.alert('Ошибка', e instanceof Error ? e.message : 'Не удалось создать матч');
       }
@@ -674,7 +686,7 @@ export default function App() {
               onPaid={async () => {
                   try {
                       const data = await createStandaloneLiveMatch(pendingStandaloneCtx);
-                      enterStandaloneControl(data, pendingStandaloneCtx);
+                      await enterStandaloneControl(data, pendingStandaloneCtx);
                   } catch (e: unknown) {
                       Alert.alert('Ошибка', e instanceof Error ? e.message : 'Не удалось создать матч');
                   }
@@ -864,8 +876,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   // Состояния
   const [isStreaming, setIsStreaming] = useState(false); 
   const [isLoading, setIsLoading] = useState(false);
-  const [permissionGranted, setPermissionGranted] = useState(false);
-  const [permissionsChecked, setPermissionsChecked] = useState(false);
+  const [permissionGranted, setPermissionGranted] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
 
   // Состояния игры
@@ -900,29 +911,11 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   );
 
   useEffect(() => {
-    if (isFreeTier) setEncoderQuality('low');
-  }, [isFreeTier]);
-
-  useEffect(() => {
     const initPermissions = async () => {
-      if (!canStream) {
-        setPermissionsChecked(true);
-        return;
-      }
-      if (Platform.OS !== 'android') {
-        setPermissionGranted(true);
-        setPermissionsChecked(true);
-        return;
-      }
+      if (!canStream) return;
+      if (Platform.OS !== 'android') return;
       const state = await getStreamPermissionState();
-      if (state === 'granted') {
-        setPermissionGranted(true);
-        setPermissionsChecked(true);
-        return;
-      }
-      const ok = await requestStreamPermissions();
-      setPermissionGranted(ok);
-      setPermissionsChecked(true);
+      setPermissionGranted(state === 'granted');
     };
     initPermissions();
   }, [canStream]);
@@ -1183,7 +1176,8 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             const settings = await loadStreamSettings();
             streamQualitySettingRef.current = settings.streamQuality;
             const quality = await resolveEncoderQuality(settings.streamQuality);
-            if (quality !== encoderQuality) setEncoderQuality(quality);
+            const streamQuality = isFreeTier ? 'low' : quality;
+            pendingStreamQualityRef.current = streamQuality;
             const rtmp = getActiveRtmpConfig(settings, match.id, match.manual_rtmp);
             if (!rtmp) {
                 Alert.alert(
@@ -1202,12 +1196,17 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             }
             const endpoint = buildRtmpEndpoint(normalized.rtmpUrl, normalized.streamKey);
             console.log('[stream] RTMP →', maskRtmpEndpoint(endpoint), 'muted=', isMuted);
-            pendingStreamQualityRef.current = quality;
             if (!videoRef.current) {
               Alert.alert('Ошибка запуска', 'Модуль камеры не готов. Подождите секунду и нажмите «ЭФИР» снова.');
               return;
             }
-            await videoRef.current.startStreaming(normalized.streamKey, normalized.rtmpUrl, isMuted, quality);
+            await videoRef.current.startStreaming(
+              normalized.streamKey,
+              normalized.rtmpUrl,
+              isMuted,
+              streamQuality,
+              !isFreeTier && replayEnabled,
+            );
             waitingConnection = true;
         } catch (e: any) {
             console.error('[stream] start failed', e);
@@ -1622,13 +1621,13 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     <View style={styles.container}>
       <StatusBar hidden />
       <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          {canStream && permissionGranted ? (
+          {canStream ? (
             <WaafLivestreamView
                 ref={videoRef}
                 style={{ flex: 1 }}
                 pointerEvents="none"
                 camera="back"
-                streamQuality={encoderQuality}
+                streamQuality="medium"
                 onConnectionSuccess={handleStreamConnected}
                 onConnectionFailed={(e: { nativeEvent?: { code?: string }; code?: string }) => {
                   const code = e?.nativeEvent?.code ?? e?.code ?? 'unknown';
@@ -1692,19 +1691,6 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                   );
                 }}
             />
-          ) : canStream && permissionsChecked && !permissionGranted ? (
-            <View style={{ flex: 1, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
-              <Text style={{ color: '#fff', fontSize: 14, fontWeight: 'bold', textAlign: 'center', marginBottom: 12 }}>
-                Нужны камера и микрофон
-              </Text>
-              <Text style={{ color: '#9ca3af', fontSize: 12, textAlign: 'center' }}>
-                Разрешите доступ в настройках Android, затем вернитесь в приложение.
-              </Text>
-            </View>
-          ) : canStream && !permissionsChecked ? (
-            <View style={{ flex: 1, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center' }}>
-              <ActivityIndicator color="#e31e24" />
-            </View>
           ) : (
             <View style={{flex: 1, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center'}}>
                  <Text style={{color: '#333333', fontSize: 16, fontWeight: 'bold', textTransform: 'uppercase'}}>Эфир отключен организатором</Text>

@@ -45,6 +45,7 @@ export type WaafLivestreamViewRef = {
     rtmpUrl: string,
     muted?: boolean,
     quality?: ResolvedStreamQuality,
+    captureReplay?: boolean,
   ) => Promise<void>;
   stopStreaming: () => Promise<void>;
   setMuted: (muted: boolean) => Promise<void>;

@@ -1,4 +1,4 @@
-﻿package expo.modules.waflivestream
+package expo.modules.waflivestream
 
 import android.content.Context
 import android.content.res.Configuration
@@ -294,7 +294,6 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
 
     encoderQuality = quality
     val rotation = videoRotation()
-    attachReplayControllerIfNeeded()
     isPrepared = try {
       genericStream.prepareVideo(quality.width, quality.height, quality.bitrate, quality.fps, 1, rotation)
         && genericStream.prepareAudio(44_100, true, 128_000)
@@ -369,7 +368,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     }
   }
 
-  fun startStreaming(rtmpUrl: String, streamKey: String, muted: Boolean, quality: String?) {
+  fun startStreaming(rtmpUrl: String, streamKey: String, muted: Boolean, quality: String?, captureReplay: Boolean = false) {
     mainHandler.removeCallbacks(publishRunnable)
     mainHandler.removeCallbacks(deferredFilterRunnable)
     stopStats()
@@ -377,6 +376,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     scoreboardFilter = null
 
     val preset = StreamQualityPreset.from(quality)
+    if (captureReplay) attachReplayControllerIfNeeded()
     if (!isPrepared || encoderQuality != preset) {
       prepareEncoder(preset)
       if (!isPrepared) {
