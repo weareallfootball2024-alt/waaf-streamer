@@ -574,9 +574,20 @@ export default function App() {
 
           const access = await fetchStreamAccess();
           if (!access.can_stream_standalone) {
-              if (access.needs_auth || access.needs_waaf_login) {
+              if (access.needs_waaf_login) {
                   promptWaafLogin(
-                      access.reason || 'Войдите в аккаунт WAAF (телефон и пароль) или через VK в настройках.',
+                      access.reason || 'Организаторы и администраторы входят в аккаунт WAAF (телефон и пароль).',
+                  );
+                  return;
+              }
+              if (access.needs_auth) {
+                  Alert.alert(
+                      'Авторизация',
+                      access.reason || 'Войдите через VK в настройках стримера.',
+                      [
+                          { text: 'Настройки', onPress: () => openSettings('step_standalone_club') },
+                          { text: 'OK', style: 'cancel' },
+                      ],
                   );
                   return;
               }
@@ -593,7 +604,7 @@ export default function App() {
           await enterStandaloneControl(data, ctx);
       } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : 'Не удалось создать матч';
-          if (/WAAF|waaf|телефон и пароль/i.test(msg)) {
+          if (/организатор|администратор|waaf_login/i.test(msg)) {
               promptWaafLogin(msg);
               return;
           }
@@ -891,7 +902,9 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   // Состояния
   const [isStreaming, setIsStreaming] = useState(false); 
   const [isLoading, setIsLoading] = useState(false);
-  const [permissionGranted, setPermissionGranted] = useState(true);
+  const [permissionGranted, setPermissionGranted] = useState(false);
+  const [permissionsChecked, setPermissionsChecked] = useState(false);
+  const [cameraMountKey, setCameraMountKey] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
 
   // Состояния игры
@@ -927,10 +940,27 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
 
   useEffect(() => {
     const initPermissions = async () => {
-      if (!canStream) return;
-      if (Platform.OS !== 'android') return;
+      if (!canStream) {
+        setPermissionsChecked(true);
+        return;
+      }
+      if (Platform.OS !== 'android') {
+        setPermissionGranted(true);
+        setPermissionsChecked(true);
+        setCameraMountKey((k) => k + 1);
+        return;
+      }
       const state = await getStreamPermissionState();
-      setPermissionGranted(state === 'granted');
+      if (state === 'granted') {
+        setPermissionGranted(true);
+        setPermissionsChecked(true);
+        setCameraMountKey((k) => k + 1);
+        return;
+      }
+      const ok = await requestStreamPermissions();
+      setPermissionGranted(ok);
+      setPermissionsChecked(true);
+      if (ok) setCameraMountKey((k) => k + 1);
     };
     initPermissions();
   }, [canStream]);
@@ -1220,7 +1250,6 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
               normalized.rtmpUrl,
               isMuted,
               streamQuality,
-              !isFreeTier && replayEnabled,
             );
             waitingConnection = true;
         } catch (e: any) {
@@ -1636,13 +1665,13 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     <View style={styles.container}>
       <StatusBar hidden />
       <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          {canStream ? (
+          {canStream && permissionGranted ? (
             <WaafLivestreamView
+                key={`camera-${cameraMountKey}`}
                 ref={videoRef}
                 style={{ flex: 1 }}
                 pointerEvents="none"
                 camera="back"
-                streamQuality="medium"
                 onConnectionSuccess={handleStreamConnected}
                 onConnectionFailed={(e: { nativeEvent?: { code?: string }; code?: string }) => {
                   const code = e?.nativeEvent?.code ?? e?.code ?? 'unknown';
@@ -1664,36 +1693,6 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                   Alert.alert('VK: не удалось подключиться', hint);
                 }}
                 onStreamStats={handleStreamStats}
-                onVideoInsertStarted={(e) => {
-                  const loop = e?.nativeEvent?.loop ?? false;
-                  setVideoInsertActive(true);
-                  setVideoInsertLoop(loop);
-                  setReplayLoading(false);
-                }}
-                onVideoInsertEnded={() => {
-                  setVideoInsertActive(false);
-                  setVideoInsertLoop(false);
-                  setReplayLoading(false);
-                }}
-                onVideoInsertError={(e) => {
-                  setVideoInsertActive(false);
-                  setVideoInsertLoop(false);
-                  setReplayLoading(false);
-                  const code = e?.nativeEvent?.code ?? 'unknown';
-                  const hint = code === 'not_streaming'
-                    ? 'Сначала запустите эфир'
-                    : code === 'insert_active'
-                    ? 'Уже идёт вставка видео'
-                    : code === 'replay_buffer_empty'
-                    ? `Подождите ${replaySeconds} сек. после старта эфира`
-                    : code === 'replay_export_failed'
-                    ? 'Не удалось собрать клип повтора'
-                    : `Ошибка: ${code}`;
-                  Alert.alert(code.startsWith('replay') ? 'Повтор' : 'Видео', hint);
-                }}
-                onReplaySaved={() => {
-                  setReplayLoading(false);
-                }}
                 onDisconnect={() => {
                   setIsStreaming(false);
                   setIsLoading(false);
@@ -1706,6 +1705,19 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                   );
                 }}
             />
+          ) : canStream && permissionsChecked && !permissionGranted ? (
+            <View style={{ flex: 1, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+              <Text style={{ color: '#fff', fontSize: 14, fontWeight: 'bold', textAlign: 'center', marginBottom: 12 }}>
+                Нужны камера и микрофон
+              </Text>
+              <Text style={{ color: '#9ca3af', fontSize: 12, textAlign: 'center' }}>
+                Разрешите доступ в настройках Android, затем вернитесь в приложение.
+              </Text>
+            </View>
+          ) : canStream && !permissionsChecked ? (
+            <View style={{ flex: 1, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center' }}>
+              <ActivityIndicator color="#e31e24" />
+            </View>
           ) : (
             <View style={{flex: 1, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center'}}>
                  <Text style={{color: '#333333', fontSize: 16, fontWeight: 'bold', textTransform: 'uppercase'}}>Эфир отключен организатором</Text>
@@ -1856,7 +1868,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                     <TouchableOpacity style={styles.btnMicSettings} onPress={openStreamSettings}>
                         <Text style={styles.btnMicText}>⚙</Text>
                     </TouchableOpacity>
-                    {canStream && isStreaming && (
+                    {false && canStream && isStreaming && (
                     <TouchableOpacity
                       style={[styles.btnInsert, videoInsertActive && { opacity: 0.5 }]}
                       onPress={() => setShowInsertSheet(true)}
@@ -1865,7 +1877,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                         <Text style={styles.btnInsertText}>РОЛИК</Text>
                     </TouchableOpacity>
                     )}
-                    {canStream && replayEnabled && !isFreeTier && (
+                    {false && canStream && replayEnabled && !isFreeTier && (
                     <TouchableOpacity
                       style={[
                         styles.btnInsert,

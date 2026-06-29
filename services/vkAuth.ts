@@ -62,6 +62,28 @@ function authSessionErrorMessage(result: WebBrowser.WebBrowserAuthSessionResult)
   return `VK не вернул авторизацию (${result.type})`;
 }
 
+export async function fetchAndStoreVkUserId(accessToken?: string): Promise<string | null> {
+  const existing = await getStoredVkUserId();
+  if (existing) return existing;
+
+  const token = accessToken || (await getStoredVkToken());
+  if (!token) return null;
+
+  const res = await fetch(`${API_URL}/api/vk/users/me`, {
+    headers: { 'X-VK-Access-Token': token },
+  });
+  const data = await res.json();
+  if (!res.ok || data.user_id == null) return null;
+
+  const id = String(data.user_id);
+  await SecureStore.setItemAsync(VK_USER_ID_KEY, id);
+  return id;
+}
+
+export async function ensureStoredVkUserId(): Promise<string | null> {
+  return fetchAndStoreVkUserId();
+}
+
 export async function loginWithVk(): Promise<string> {
   const startUrl = `${API_URL}/api/auth/vk-id/start`;
 
@@ -91,6 +113,8 @@ export async function loginWithVk(): Promise<string> {
   await SecureStore.setItemAsync(VK_TOKEN_KEY, data.access_token);
   if (data.user_id != null) {
     await SecureStore.setItemAsync(VK_USER_ID_KEY, String(data.user_id));
+  } else {
+    await fetchAndStoreVkUserId(data.access_token);
   }
   return data.access_token;
 }

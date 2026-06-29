@@ -1,6 +1,6 @@
 import { API_URL } from '../constants/api';
 import { authFetch, getToken } from './authSession';
-import { getStoredVkUserId } from './vkAuth';
+import { ensureStoredVkUserId } from './vkAuth';
 
 export type StreamAccess = {
   can_stream_standalone: boolean;
@@ -33,7 +33,7 @@ export async function buildStreamIdentityHeaders(): Promise<Record<string, strin
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = await getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
-  const vkUserId = await getStoredVkUserId();
+  const vkUserId = await ensureStoredVkUserId();
   if (vkUserId) headers['X-VK-User-Id'] = vkUserId;
   return headers;
 }

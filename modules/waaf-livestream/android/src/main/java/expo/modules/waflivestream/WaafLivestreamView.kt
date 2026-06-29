@@ -19,8 +19,6 @@ import com.pedro.library.generic.GenericStream
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
-import java.io.File
-import java.util.concurrent.Executors
 
 @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
 class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(context, appContext) {
@@ -29,10 +27,6 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   val onConnectionFailed by EventDispatcher()
   val onDisconnect by EventDispatcher()
   val onStreamStats by EventDispatcher()
-  val onVideoInsertStarted by EventDispatcher()
-  val onVideoInsertEnded by EventDispatcher()
-  val onVideoInsertError by EventDispatcher()
-  val onReplaySaved by EventDispatcher()
 
   private val surfaceView = SurfaceView(context)
   private val microphoneSource = MicrophoneSource()
@@ -44,6 +38,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   private var isMuted = false
   private var scoreboardReady = false
   private var encoderQuality: StreamQualityPreset = StreamQualityPreset.MEDIUM
+  private var surfaceReady = false
 
   private var teamHome = "Хозяева"
   private var teamAway = "Гости"
@@ -119,10 +114,6 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     override fun onAuthSuccess() {}
   }
 
-  private val replayRingBuffer = ReplayRingBuffer()
-  private val replayExecutor = Executors.newSingleThreadExecutor()
-  private lateinit var videoInjector: VideoInjector
-
   private val genericStream: GenericStream = GenericStream(
     context,
     connectChecker,
@@ -132,59 +123,12 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     getGlInterface().autoHandleOrientation = true
     getStreamClient().apply {
       setReTries(3)
-      setDelay(0)
+      setDelay(300)
       setWriteChunkSize(4096)
     }
   }
 
-  private var replayControllerAttached = false
-
-  private fun attachReplayControllerIfNeeded() {
-    if (replayControllerAttached) return
-    try {
-      genericStream.setRecordController(ReplayCaptureRecordController(replayRingBuffer))
-      replayControllerAttached = true
-    } catch (e: Exception) {
-      Log.e(TAG, "replay controller attach failed", e)
-    }
-  }
-
   init {
-    videoInjector = VideoInjector(
-      context,
-      genericStream,
-      microphoneSource,
-      mainHandler,
-      object : VideoInjector.Callbacks {
-        override fun onInsertStarted(kind: String, loop: Boolean) {
-          post { onVideoInsertStarted(mapOf("kind" to kind, "loop" to loop)) }
-        }
-
-        override fun onInsertEnded(kind: String) {
-          post { onVideoInsertEnded(mapOf("kind" to kind)) }
-        }
-
-        override fun onInsertError(code: String) {
-          post { onVideoInsertError(mapOf("code" to code)) }
-        }
-
-        override fun hideGlFilters() = hideGlFiltersForInsert()
-
-        override fun scheduleScoreboardRestore() {
-          scoreboardReady = false
-          if (genericStream.isStreaming) {
-            mainHandler.postDelayed(deferredFilterRunnable, 400)
-          }
-        }
-
-        override fun isMicMuted(): Boolean = isMuted
-
-        override fun setMicMuted(muted: Boolean) = setMicrophoneMuted(muted)
-
-        override fun createCameraSource(): Camera2Source = Camera2Source(context)
-      },
-    )
-
     layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
     addView(
       surfaceView,
@@ -193,90 +137,37 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
 
     surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
       override fun surfaceCreated(holder: SurfaceHolder) {
-        try {
-          if (!genericStream.isOnPreview) {
-            if (!isPrepared) prepareEncoder(encoderQuality)
-            if (isPrepared) {
-              genericStream.startPreview(surfaceView)
-            } else {
-              Log.e(TAG, "surfaceCreated: encoder not prepared")
-            }
-          }
-        } catch (e: Exception) {
-          Log.e(TAG, "surfaceCreated failed", e)
-        }
+        surfaceReady = true
+        mainHandler.post { startPreviewIfReady("surfaceCreated") }
       }
 
       override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        genericStream.getGlInterface().setPreviewResolution(width, height)
+        if (width > 0 && height > 0) {
+          try {
+            genericStream.getGlInterface().setPreviewResolution(width, height)
+          } catch (e: Exception) {
+            Log.w(TAG, "setPreviewResolution failed", e)
+          }
+          if (!genericStream.isOnPreview) {
+            mainHandler.post { startPreviewIfReady("surfaceChanged") }
+          }
+        }
       }
 
       override fun surfaceDestroyed(holder: SurfaceHolder) {
+        surfaceReady = false
         mainHandler.removeCallbacks(publishRunnable)
         mainHandler.removeCallbacks(deferredFilterRunnable)
         stopStats()
         if (genericStream.isOnPreview) {
-          genericStream.stopPreview()
+          try {
+            genericStream.stopPreview()
+          } catch (e: Exception) {
+            Log.w(TAG, "stopPreview failed", e)
+          }
         }
       }
     })
-  }
-
-  private fun hideGlFiltersForInsert() {
-    hideEventBanner()
-    try {
-      genericStream.getGlInterface().clearFilters()
-    } catch (_: Exception) {
-    }
-    scoreboardFilter = null
-    scoreboardReady = false
-  }
-
-  fun playVideoInsert(filePath: String, loop: Boolean) {
-    videoInjector.play(filePath, loop, "ad")
-  }
-
-  fun stopVideoInsert() {
-    videoInjector.stop()
-  }
-
-  fun triggerReplay(seconds: Int) {
-    if (!genericStream.isStreaming) {
-      post { onVideoInsertError(mapOf("code" to "not_streaming")) }
-      return
-    }
-    if (videoInjector.isActive) {
-      post { onVideoInsertError(mapOf("code" to "insert_active")) }
-      return
-    }
-
-    val clipSeconds = seconds.coerceIn(1, 15)
-    replayExecutor.execute {
-      try {
-        val snapshot = replayRingBuffer.snapshot()
-        if (snapshot.videoFrames.isEmpty()) {
-          mainHandler.post { onVideoInsertError(mapOf("code" to "replay_buffer_empty")) }
-          return@execute
-        }
-
-        val file = File(context.cacheDir, "replay_${System.currentTimeMillis()}.mp4")
-        val ok = ReplayExporter.exportLastSeconds(snapshot, clipSeconds, file.absolutePath)
-        if (!ok) {
-          mainHandler.post { onVideoInsertError(mapOf("code" to "replay_export_failed")) }
-          return@execute
-        }
-
-        mainHandler.post {
-          post { onReplaySaved(mapOf("uri" to file.absolutePath)) }
-          videoInjector.play(file.absolutePath, false, "replay")
-        }
-      } catch (e: Exception) {
-        Log.e(TAG, "triggerReplay failed", e)
-        mainHandler.post {
-          onVideoInsertError(mapOf("code" to (e.message ?: "replay_failed")))
-        }
-      }
-    }
   }
 
   private fun videoRotation(): Int {
@@ -284,43 +175,77 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     return if (o == Configuration.ORIENTATION_LANDSCAPE) 90 else 0
   }
 
-  private fun prepareEncoder(quality: StreamQualityPreset) {
-    if (isPrepared && encoderQuality == quality) return
+  private fun prepareEncoder(requested: StreamQualityPreset): Boolean {
+    if (isPrepared && encoderQuality == requested) return true
 
     if (isPrepared) {
-      if (genericStream.isOnPreview) genericStream.stopPreview()
+      if (genericStream.isOnPreview) {
+        try {
+          genericStream.stopPreview()
+        } catch (e: Exception) {
+          Log.w(TAG, "stopPreview before re-prepare failed", e)
+        }
+      }
       isPrepared = false
     }
 
-    encoderQuality = quality
     val rotation = videoRotation()
-    isPrepared = try {
-      genericStream.prepareVideo(quality.width, quality.height, quality.bitrate, quality.fps, 1, rotation)
-        && genericStream.prepareAudio(44_100, true, 128_000)
-    } catch (e: Exception) {
-      Log.e(TAG, "prepareEncoder failed", e)
-      false
+    val candidates = linkedSetOf(
+      requested,
+      StreamQualityPreset.MEDIUM,
+      StreamQualityPreset.LOW,
+      StreamQualityPreset.HIGH,
+    )
+
+    for (preset in candidates) {
+      val ok = try {
+        genericStream.prepareVideo(preset.width, preset.height, preset.bitrate, preset.fps, 1, rotation)
+          && genericStream.prepareAudio(44_100, true, 128_000)
+      } catch (e: Exception) {
+        Log.w(TAG, "prepareEncoder ${preset.name} failed", e)
+        false
+      }
+      if (ok) {
+        encoderQuality = preset
+        isPrepared = true
+        Log.i(
+          TAG,
+          "encoder prepared ${preset.width}x${preset.height} ${preset.bitrate}bps rotation=$rotation",
+        )
+        return true
+      }
     }
-    if (isPrepared) {
-      Log.i(
-        TAG,
-        "encoder prepared ${quality.width}x${quality.height} ${quality.bitrate}bps rotation=$rotation",
-      )
+
+    isPrepared = false
+    Log.e(TAG, "prepareEncoder: all quality presets failed")
+    return false
+  }
+
+  private fun startPreviewIfReady(reason: String) {
+    if (!surfaceReady) return
+    if (genericStream.isOnPreview) return
+    if (surfaceView.holder.surface?.isValid != true) {
+      Log.w(TAG, "$reason: surface not valid yet")
+      return
+    }
+    if (!isPrepared && !prepareEncoder(encoderQuality)) {
+      Log.e(TAG, "$reason: encoder not prepared")
+      return
+    }
+    try {
+      genericStream.startPreview(surfaceView)
+      Log.i(TAG, "preview started ($reason)")
+    } catch (e: Exception) {
+      Log.e(TAG, "$reason preview failed", e)
     }
   }
 
   fun setStreamQuality(quality: String) {
+    if (genericStream.isStreaming) return
     val preset = StreamQualityPreset.from(quality)
     if (preset == encoderQuality && isPrepared) return
-    if (genericStream.isStreaming) return
     prepareEncoder(preset)
-    if (!genericStream.isOnPreview && surfaceView.holder.surface?.isValid == true && isPrepared) {
-      try {
-        genericStream.startPreview(surfaceView)
-      } catch (e: Exception) {
-        Log.w(TAG, "preview restart after quality change failed", e)
-      }
-    }
+    startPreviewIfReady("setStreamQuality")
   }
 
   private fun setMicrophoneMuted(muted: Boolean) {
@@ -368,7 +293,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     }
   }
 
-  fun startStreaming(rtmpUrl: String, streamKey: String, muted: Boolean, quality: String?, captureReplay: Boolean = false) {
+  fun startStreaming(rtmpUrl: String, streamKey: String, muted: Boolean, quality: String? = null) {
     mainHandler.removeCallbacks(publishRunnable)
     mainHandler.removeCallbacks(deferredFilterRunnable)
     stopStats()
@@ -376,13 +301,9 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     scoreboardFilter = null
 
     val preset = StreamQualityPreset.from(quality)
-    if (captureReplay) attachReplayControllerIfNeeded()
-    if (!isPrepared || encoderQuality != preset) {
-      prepareEncoder(preset)
-      if (!isPrepared) {
-        onConnectionFailed(mapOf("code" to "encoder_prepare_failed"))
-        return
-      }
+    if (!prepareEncoder(preset)) {
+      onConnectionFailed(mapOf("code" to "encoder_prepare_failed"))
+      return
     }
 
     setMicrophoneMuted(muted)
@@ -400,16 +321,8 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     pendingEndpoint = endpoint
     Log.i(TAG, "Start stream → ${maskEndpoint(endpoint)} muted=$muted")
 
-    val delayMs = if (genericStream.isOnPreview) 1200L else 2000L
-    if (!genericStream.isOnPreview && surfaceView.holder.surface?.isValid == true) {
-      try {
-        genericStream.startPreview(surfaceView)
-      } catch (e: Exception) {
-        Log.e(TAG, "startPreview before stream failed", e)
-        onConnectionFailed(mapOf("code" to "preview_failed"))
-        return
-      }
-    }
+    startPreviewIfReady("startStreaming")
+    val delayMs = if (genericStream.isOnPreview) 1200L else 2500L
     mainHandler.postDelayed(publishRunnable, delayMs)
   }
 
@@ -417,6 +330,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     val url = pendingEndpoint ?: return
     if (genericStream.isStreaming) return
     if (!genericStream.isOnPreview) {
+      startPreviewIfReady("publishStream")
       Log.w(TAG, "preview not ready, retry publish")
       mainHandler.postDelayed(publishRunnable, 500)
       return
@@ -431,26 +345,21 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   }
 
   fun stopStreaming() {
-    if (videoInjector.isActive) {
-      videoInjector.stop()
-    }
     mainHandler.removeCallbacks(publishRunnable)
     mainHandler.removeCallbacks(deferredFilterRunnable)
     stopStats()
     pendingEndpoint = null
     scoreboardReady = false
-    replayRingBuffer.clear()
+    hideEventBanner()
     if (genericStream.isStreaming) {
       genericStream.stopStream()
     }
-    hideEventBanner()
-    eventFilterAdded = false
     try {
       genericStream.getGlInterface().clearFilters()
     } catch (_: Exception) {
     }
     scoreboardFilter = null
-    scoreboardReady = false
+    startPreviewIfReady("stopStreaming")
   }
 
   fun setMuted(muted: Boolean) {
@@ -511,14 +420,10 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   }
 
   override fun onDetachedFromWindow() {
-    if (videoInjector.isActive) {
-      videoInjector.stop()
-    }
-    replayExecutor.shutdownNow()
-    replayRingBuffer.clear()
     mainHandler.removeCallbacks(publishRunnable)
     mainHandler.removeCallbacks(deferredFilterRunnable)
     stopStats()
+    surfaceReady = false
     if (genericStream.isStreaming) {
       genericStream.stopStream()
     }

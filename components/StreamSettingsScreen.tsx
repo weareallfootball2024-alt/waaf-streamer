@@ -34,6 +34,7 @@ import { loadStreamSettings, saveStreamSettings } from '../services/streamConfig
 import { getPlaylistSessionRtmp, setPlaylistSessionRtmp } from '../services/vkPlaylistSession';
 import {
   clearVkToken,
+  ensureStoredVkUserId,
   fetchAdminGroups,
   fetchGroupAlbums,
   getStoredVkToken,
@@ -98,7 +99,10 @@ export function StreamSettingsScreen({ onClose }: Props) {
         setPlaylistStreamKey(playlistSession.streamKey);
       }
       const token = await getStoredVkToken();
-      const storedVkId = await getStoredVkUserId();
+      let storedVkId = await getStoredVkUserId();
+      if (token && !storedVkId) {
+        storedVkId = await ensureStoredVkUserId();
+      }
       setVkUserId(storedVkId);
       setVkLoggedIn(!!token);
       const user = (await restoreSession()) || (await getUser());
