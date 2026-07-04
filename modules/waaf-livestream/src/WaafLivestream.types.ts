@@ -7,6 +7,8 @@ export type ScoreboardPayload = {
   scoreAway: number;
   timer: string;
   period?: string;
+  logoHome?: string | null;
+  logoAway?: string | null;
 };
 
 export type EventBannerPayload = {

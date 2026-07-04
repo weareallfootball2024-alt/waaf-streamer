@@ -84,6 +84,20 @@ function getPeriodLabel(period: number): string {
   return 'Завершён';
 }
 
+function resolveMatchTeamNames(match: {
+  team_home?: string;
+  team_away?: string;
+  teamHome?: string;
+  teamAway?: string;
+}) {
+  const home = String(match.team_home ?? match.teamHome ?? '').trim();
+  const away = String(match.team_away ?? match.teamAway ?? '').trim();
+  return {
+    home: home || 'Хозяева',
+    away: away || 'Гости',
+  };
+}
+
 function resolveLogoUri(logo?: string | null): string | null {
   if (!logo) return null;
   if (logo.startsWith('http') || logo.startsWith('file://') || logo.startsWith('content://')) {
@@ -535,6 +549,10 @@ export default function App() {
       setStandaloneTier(tier);
       setSelectedMatch({
           ...data.match,
+          team_home: data.match.team_home || ctx?.teamHome,
+          team_away: data.match.team_away || ctx?.teamAway,
+          logo_home: data.match.logo_home || ctx?.clubLogoUri || null,
+          logo_away: data.match.logo_away || ctx?.awayLogoUri || null,
           standalone: true,
           standalone_tier: tier,
           manual_rtmp: ctx?.rtmpUrl && ctx?.streamKey
@@ -1058,11 +1076,29 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
 
   useEffect(() => {
     if (settingsOpen) return;
-    loadStreamSettings().then((settings) => {
+    loadStreamSettings().then(async (settings) => {
       setReplayEnabled(settings.replayEnabled);
       setReplaySeconds(settings.replaySeconds);
+      streamQualitySettingRef.current = settings.streamQuality;
+      const resolved = await resolveEncoderQuality(settings.streamQuality);
+      setEncoderQuality(isFreeTier ? 'low' : resolved);
     });
-  }, [settingsOpen]);
+  }, [settingsOpen, isFreeTier]);
+
+  const pushScoreboardToNative = () => {
+    if (!canStream || !permissionGranted || !videoRef.current) return;
+    const teams = resolveMatchTeamNames(match);
+    videoRef.current.updateScoreboard({
+      teamHome: teams.home,
+      teamAway: teams.away,
+      scoreHome: score.home,
+      scoreAway: score.away,
+      timer: formatTimer(displaySeconds),
+      period: getPeriodLabel(period),
+      logoHome: resolveLogoUri(match.logo_home) || undefined,
+      logoAway: resolveLogoUri(match.logo_away) || undefined,
+    }).catch(() => {});
+  };
 
   const finishAutoQualitySession = async (hadDisconnect = false) => {
     const session = streamSessionRef.current;
@@ -1081,16 +1117,23 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   };
 
   useEffect(() => {
-    if (!canStream || !videoRef.current) return;
-    videoRef.current.updateScoreboard({
-      teamHome: match.team_home || 'Хозяева',
-      teamAway: match.team_away || 'Гости',
-      scoreHome: score.home,
-      scoreAway: score.away,
-      timer: formatTimer(displaySeconds),
-      period: getPeriodLabel(period),
-    }).catch(() => {});
-  }, [canStream, match.team_home, match.team_away, score.home, score.away, displaySeconds, period]);
+    pushScoreboardToNative();
+  }, [
+    canStream,
+    permissionGranted,
+    cameraMountKey,
+    match.team_home,
+    match.team_away,
+    match.teamHome,
+    match.teamAway,
+    match.logo_home,
+    match.logo_away,
+    score.home,
+    score.away,
+    displaySeconds,
+    period,
+    isStreaming,
+  ]);
 
   // Получает актуальное время для записи в событие (то, что видит зритель)
   const getCurrentDisplaySeconds = () => {
@@ -1250,6 +1293,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
               normalized.rtmpUrl,
               isMuted,
               streamQuality,
+              !isFreeTier && replayEnabled,
             );
             waitingConnection = true;
         } catch (e: any) {
@@ -1277,6 +1321,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     setIsLoading(false);
     setIsStreaming(true);
     wasStreamingRef.current = true;
+    pushScoreboardToNative();
     sendUpdate({ status: 'live' });
     streamStatsRef.current.videoFrames = 0;
     streamSessionRef.current = {
@@ -1672,6 +1717,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                 style={{ flex: 1 }}
                 pointerEvents="none"
                 camera="back"
+                streamQuality={isFreeTier ? 'low' : encoderQuality}
                 onConnectionSuccess={handleStreamConnected}
                 onConnectionFailed={(e: { nativeEvent?: { code?: string }; code?: string }) => {
                   const code = e?.nativeEvent?.code ?? e?.code ?? 'unknown';
@@ -1693,6 +1739,37 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                   Alert.alert('VK: не удалось подключиться', hint);
                 }}
                 onStreamStats={handleStreamStats}
+                onVideoInsertStarted={(e) => {
+                  const loop = e?.nativeEvent?.loop ?? false;
+                  setVideoInsertActive(true);
+                  setVideoInsertLoop(loop);
+                  setReplayLoading(false);
+                }}
+                onVideoInsertEnded={() => {
+                  setVideoInsertActive(false);
+                  setVideoInsertLoop(false);
+                  setReplayLoading(false);
+                  pushScoreboardToNative();
+                }}
+                onVideoInsertError={(e) => {
+                  setVideoInsertActive(false);
+                  setVideoInsertLoop(false);
+                  setReplayLoading(false);
+                  const code = e?.nativeEvent?.code ?? 'unknown';
+                  const hint = code === 'not_streaming'
+                    ? 'Сначала запустите эфир'
+                    : code === 'insert_active'
+                    ? 'Уже идёт вставка видео'
+                    : code === 'replay_buffer_empty'
+                    ? `Подождите ${replaySeconds} сек. после старта эфира`
+                    : code === 'replay_export_failed'
+                    ? 'Не удалось собрать клип повтора'
+                    : `Ошибка: ${code}`;
+                  Alert.alert(code.startsWith('replay') ? 'Повтор' : 'Видео', hint);
+                }}
+                onReplaySaved={() => {
+                  setReplayLoading(false);
+                }}
                 onDisconnect={() => {
                   setIsStreaming(false);
                   setIsLoading(false);
@@ -1868,7 +1945,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                     <TouchableOpacity style={styles.btnMicSettings} onPress={openStreamSettings}>
                         <Text style={styles.btnMicText}>⚙</Text>
                     </TouchableOpacity>
-                    {false && canStream && isStreaming && (
+                    {canStream && isStreaming && (
                     <TouchableOpacity
                       style={[styles.btnInsert, videoInsertActive && { opacity: 0.5 }]}
                       onPress={() => setShowInsertSheet(true)}
@@ -1877,7 +1954,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                         <Text style={styles.btnInsertText}>РОЛИК</Text>
                     </TouchableOpacity>
                     )}
-                    {false && canStream && replayEnabled && !isFreeTier && (
+                    {canStream && replayEnabled && !isFreeTier && (
                     <TouchableOpacity
                       style={[
                         styles.btnInsert,

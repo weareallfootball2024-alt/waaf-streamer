@@ -13,6 +13,10 @@ class WaafLivestreamModule : Module() {
         "onConnectionFailed",
         "onDisconnect",
         "onStreamStats",
+        "onVideoInsertStarted",
+        "onVideoInsertEnded",
+        "onVideoInsertError",
+        "onReplaySaved",
       )
 
       Prop("camera") { view: WaafLivestreamView, camera: String ->
@@ -23,8 +27,8 @@ class WaafLivestreamModule : Module() {
         view.setStreamQuality(quality)
       }
 
-      AsyncFunction("startStreaming") { view: WaafLivestreamView, streamKey: String, rtmpUrl: String, muted: Boolean?, quality: String? ->
-        view.startStreaming(rtmpUrl, streamKey, muted ?: false, quality)
+      AsyncFunction("startStreaming") { view: WaafLivestreamView, streamKey: String, rtmpUrl: String, muted: Boolean?, quality: String?, captureReplay: Boolean? ->
+        view.startStreaming(rtmpUrl, streamKey, muted ?: false, quality, captureReplay ?: false)
       }
 
       AsyncFunction("stopStreaming") { view: WaafLivestreamView ->
@@ -48,6 +52,18 @@ class WaafLivestreamModule : Module() {
           assistantNumber = payload["assistantNumber"]?.toString(),
           durationMs = (payload["durationMs"] as? Number)?.toLong() ?: 6000L,
         )
+      }
+
+      AsyncFunction("playVideoInsert") { view: WaafLivestreamView, filePath: String, loop: Boolean? ->
+        view.playVideoInsert(filePath, loop ?: false)
+      }
+
+      AsyncFunction("stopVideoInsert") { view: WaafLivestreamView ->
+        view.stopVideoInsert()
+      }
+
+      AsyncFunction("triggerReplay") { view: WaafLivestreamView, seconds: Int? ->
+        view.triggerReplay(seconds ?: 10)
       }
     }
   }
