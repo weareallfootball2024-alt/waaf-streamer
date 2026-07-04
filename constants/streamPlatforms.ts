@@ -101,7 +101,7 @@ export const DEFAULT_STREAM_SETTINGS: StreamSettings = {
   vk: {
     ...emptyPlatform(true),
     streamTarget: 'wall',
-    streamSource: 'api',
+    streamSource: 'manual',
     communityId: undefined,
     communityName: undefined,
   },
