@@ -48,7 +48,7 @@ import {
 } from '../../services/streamQuality';
 import { checkStreamReadiness } from '../../services/streamReadiness';
 import { canOpenStreamSettings } from '../../services/streamSettingsAccess';
-import { stopVkLiveBroadcast, parseVkVideoRef, vkStreamErrorMessage, fetchActiveVkLive } from '../../services/vkAuth';
+import { stopVkLiveBroadcast, startVkLiveBroadcast, parseVkVideoRef, vkStreamErrorMessage, fetchActiveVkLive, getStoredVkToken } from '../../services/vkAuth';
 import { saveVkLiveSession, loadVkLiveSession, clearVkLiveSession } from '../../services/vkLiveSession';
 import {
   getStreamPermissionState,
@@ -937,6 +937,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   const streamTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const wasStreamingRef = useRef(false);
   const pendingStreamQualityRef = useRef<ResolvedStreamQuality>('medium');
+  const pendingVkApiStreamRef = useRef(false);
   const [vkShareUrl, setVkShareUrl] = useState('');
   const [streamHealth, setStreamHealth] = useState('');
   const [encoderQuality, setEncoderQuality] = useState<ResolvedStreamQuality>('medium');
@@ -1204,9 +1205,14 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       }
       const session = await loadVkLiveSession();
       const parsed = parseVkVideoRef(settings.vk.embedUrl);
+      let videoId = session?.videoId ?? settings.vk.liveVideoId ?? parsed?.videoId;
+      if (!videoId && settings.vk.communityId) {
+        const active = await fetchActiveVkLive(settings.vk.communityId);
+        if (active) videoId = active.videoId;
+      }
       const result = await stopVkLiveBroadcast({
         groupId: session?.groupId ?? settings.vk.communityId,
-        videoId: session?.videoId ?? settings.vk.liveVideoId ?? parsed?.videoId,
+        videoId,
         embedUrl: session?.embedUrl ?? settings.vk.embedUrl,
       });
       await clearVkLiveSession();
@@ -1222,7 +1228,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       }
       return {
         ok: false,
-        message: `RTMP отключён. VK API: ${vkStreamErrorMessage(result.error)}. Завершите трансляцию в Studio вручную или укажите ссылку video в настройках.`,
+        message: `RTMP отключён. ${vkStreamErrorMessage(result.error)}`,
       };
     } catch (e) {
       console.warn('[vk] stop broadcast failed', e);
@@ -1356,16 +1362,62 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             const streamQuality = isFreeTier ? 'low' : quality;
             pendingStreamQualityRef.current = streamQuality;
 
-            const rtmp = getActiveRtmpConfig(settings, match.id, match.manual_rtmp);
-            if (!rtmp) {
-              Alert.alert(
-                "Настройте трансляцию",
-                getStreamSetupHint(settings),
-                [{ text: "Открыть настройки", onPress: openStreamSettings }, { text: "OK" }]
-              );
-              return;
+            let rtmpUrl = '';
+            let streamKey = '';
+            let vkApiUsed = false;
+
+            if (settings.activePlatform === 'vk' && settings.vk.communityId) {
+              const vkToken = await getStoredVkToken();
+              if (vkToken) {
+                const matchTitle = `${match.team_home || match.teamHome || 'Хозяева'} — ${match.team_away || match.teamAway || 'Гости'}`;
+                const vkStart = await startVkLiveBroadcast({
+                  groupId: settings.vk.communityId,
+                  name: matchTitle.slice(0, 128),
+                  wallpost: settings.vk.streamTarget === 'playlist',
+                });
+                if (vkStart.ok && vkStart.rtmpUrl && vkStart.streamKey) {
+                  rtmpUrl = vkStart.rtmpUrl;
+                  streamKey = vkStart.streamKey;
+                  vkApiUsed = true;
+                  const ownerId = vkStart.ownerId ?? -settings.vk.communityId;
+                  await saveVkLiveSession({
+                    groupId: settings.vk.communityId,
+                    videoId: vkStart.videoId,
+                    ownerId: vkStart.ownerId,
+                    postId: vkStart.postId,
+                    rtmpUrl,
+                    streamKey,
+                    embedUrl:
+                      vkStart.videoId != null
+                        ? `https://vk.com/video${ownerId}_${vkStart.videoId}`
+                        : undefined,
+                    startedAt: Date.now(),
+                  });
+                } else if (vkStart.error && vkStart.error !== 'no_vk_token') {
+                  console.warn('[vk] startStreaming:', vkStart.error);
+                }
+              }
             }
-            const normalized = normalizeRtmpFields(rtmp.rtmpUrl, rtmp.streamKey);
+
+            if (!rtmpUrl || !streamKey) {
+              const rtmp = getActiveRtmpConfig(settings, match.id, match.manual_rtmp);
+              if (!rtmp) {
+                const hint = settings.activePlatform === 'vk' && settings.vk.communityId
+                  ? `${getStreamSetupHint(settings)}\n\nИли войдите через VK — ключи выдаются автоматически (нужен scope video).`
+                  : getStreamSetupHint(settings);
+                Alert.alert(
+                  'Настройте трансляцию',
+                  hint,
+                  [{ text: 'Открыть настройки', onPress: openStreamSettings }, { text: 'OK' }],
+                );
+                return;
+              }
+              rtmpUrl = rtmp.rtmpUrl;
+              streamKey = rtmp.streamKey;
+            }
+
+            pendingVkApiStreamRef.current = vkApiUsed;
+            const normalized = normalizeRtmpFields(rtmpUrl, streamKey);
             const rtmpError = validateRtmpSettings(normalized.rtmpUrl, normalized.streamKey);
             if (rtmpError) {
               Alert.alert('VK RTMP', `${rtmpError}\n\nURL: rtmp://…/input/ или rtmps://pub.live.vkvideo.ru/app/\nКлюч — отдельным полем из VK Studio.`);
@@ -1451,7 +1503,6 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       }
     }
 
-    const onWall = settings.vk.streamTarget === 'playlist';
     if (streamHealthTimerRef.current) clearTimeout(streamHealthTimerRef.current);
     streamHealthTimerRef.current = setTimeout(() => {
       if (streamStatsRef.current.videoFrames < 10) {
@@ -1463,9 +1514,13 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     }, 8000);
     Alert.alert(
       'Эфир запущен',
-      onWall
-        ? `RTMP подключён.\n\nДля поста на стене: Studio → «В эфир». СТОП в приложении завершит трансляцию.${vkShareUrl ? `\n\nСсылка: ${vkShareUrl}` : ''}`
-        : `RTMP подключён — эфир в разделе «Видео» сообщества.\n\nНа главную стену не попадёт с постоянным ключом. Для стены переключите режим «Трансляция на стену» в настройках.${vkShareUrl ? `\n\nСсылка: ${vkShareUrl}` : ''}`,
+      pendingVkApiStreamRef.current
+        ? settings.vk.streamTarget === 'playlist'
+          ? `Трансляция создана через VK API${vkShareUrl ? `\n\nСсылка: ${vkShareUrl}` : ''}\n\nПост на стене создан. СТОП завершит эфир в Studio.`
+          : `Трансляция создана через VK API. СТОП завершит эфир в Studio.${vkShareUrl ? `\n\nСсылка: ${vkShareUrl}` : ''}`
+        : settings.vk.streamTarget === 'playlist'
+          ? `RTMP подключён (ключи из Studio).\n\nНажмите «В эфир» в Studio для поста на стене. Для авто-завершения войдите через VK.${vkShareUrl ? `\n\nСсылка: ${vkShareUrl}` : ''}`
+          : `RTMP подключён (постоянный ключ) — эфир в разделе «Видео», не на стене.\n\nДля стены выберите «Трансляция на стену» и войдите через VK.${vkShareUrl ? `\n\nСсылка: ${vkShareUrl}` : ''}`,
     );
   };
 

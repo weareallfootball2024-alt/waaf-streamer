@@ -632,9 +632,11 @@ export function StreamSettingsScreen({ onClose }: Props) {
 
             {hasCommunity && (
               <>
-                <Text style={[styles.blockTitle, { marginTop: 16 }]}>Ключи из VK Studio</Text>
+                <Text style={[styles.blockTitle, { marginTop: 16 }]}>Трансляция VK</Text>
                 <Text style={[styles.hint, { marginBottom: 8 }]}>
-                  RTMP и ключ копируются из Studio. СТОП в приложении завершает трансляцию через VK API (нужен вход через VK).
+                  {vkLoggedIn
+                    ? 'При ЭФИР приложение создаёт трансляцию через VK API (как SportCam): ключи и завершение по СТОП — автоматически. Поля RTMP ниже — только запасной вариант.'
+                    : 'Войдите через VK выше — тогда ключи и завершение эфира работают автоматически. Без VK — вставьте RTMP из Studio вручную.'}
                 </Text>
 
                 <Text style={[styles.blockTitle, { marginTop: 8 }]}>Куда публикуется эфир</Text>
@@ -644,7 +646,7 @@ export function StreamSettingsScreen({ onClose }: Props) {
                     onPress={() => setStreamTarget('wall')}
                   >
                     <Text style={[styles.platformChipText, vk.streamTarget === 'wall' && styles.platformChipTextActive]}>
-                      Постоянный ключ
+                      Раздел «Видео»
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
@@ -652,22 +654,23 @@ export function StreamSettingsScreen({ onClose }: Props) {
                     onPress={() => setStreamTarget('playlist')}
                   >
                     <Text style={[styles.platformChipText, vk.streamTarget === 'playlist' && styles.platformChipTextActive]}>
-                      Трансляция на стену
+                      Пост на стене
                     </Text>
                   </TouchableOpacity>
                 </View>
 
                 <Text style={[styles.hint, { marginBottom: 10 }]}>
-                  Постоянный ключ — эфир попадает в раздел «Видео», не на главную стену. Для поста на стене: режим «Трансляция на стену» → в Studio создайте трансляцию с публикацией на стену → «В эфир».
+                  {vk.streamTarget === 'playlist'
+                    ? 'С входом через VK: пост на стене создаётся при ЭФИР (wallpost). Без VK — создайте трансляцию в Studio и вставьте RTMP вручную.'
+                    : 'Постоянный ключ Studio — только раздел «Видео», не стена. Для стены выберите «Пост на стене» и войдите через VK.'}
                 </Text>
+
+                <Text style={[styles.blockTitle, { marginTop: 4 }]}>Запасные ключи Studio (необязательно)</Text>
 
                 {vk.streamTarget === 'wall' && (
                   <>
                     <Text style={styles.hint}>
-                      Кабинет СООБЩЕСТВА в Studio → Ключи и виджеты. Постоянный ключ не всегда создаёт пост на стене автоматически.
-                    </Text>
-                    <Text style={[styles.hint, { color: '#ffcc66' }]}>
-                      Если на стене пусто: Управление сообществом → Разделы → включите «Трансляции». В Studio нажмите «В эфир». Или переключитесь на режим «Плейлист» — создайте трансляцию в Studio, вставьте её RTMP и «Применить для эфира».
+                      Studio → Ключи и виджеты. Используйте, если VK API недоступен (нет scope video).
                     </Text>
                     <TextInput
                       style={styles.input}
@@ -692,7 +695,7 @@ export function StreamSettingsScreen({ onClose }: Props) {
                 {vk.streamTarget === 'playlist' && (
                   <>
                     <Text style={styles.hint}>
-                      Studio → Трансляции → создать эфир с публикацией на стену → скопировать RTMP. После подключения нажмите «В эфир» в Studio.
+                      Studio → Трансляции. Только если VK API не сработал — вставьте RTMP вручную.
                     </Text>
                     {albumsLoading && <ActivityIndicator color="#888" style={{ marginBottom: 8 }} />}
                     {albums.length > 0 && (
@@ -730,22 +733,10 @@ export function StreamSettingsScreen({ onClose }: Props) {
                       secureTextEntry
                     />
                     <TouchableOpacity style={styles.btnApply} onPress={applyPlaylistRtmp}>
-                      <Text style={styles.btnApplyText}>ПРИМЕНИТЬ ДЛЯ ЭФИРА</Text>
+                      <Text style={styles.btnApplyText}>ПРИМЕНИТЬ ЗАПАСНЫЕ КЛЮЧИ</Text>
                     </TouchableOpacity>
                   </>
                 )}
-
-                <Text style={[styles.hint, { marginTop: 12 }]}>
-                  Ссылка на трансляцию (video-123_456) — если СТОП не завершает эфир в Studio автоматически:
-                </Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="https://vk.com/video-123_456"
-                  placeholderTextColor="#666"
-                  value={vk.embedUrl}
-                  onChangeText={(t) => updatePlatform('vk', { embedUrl: t })}
-                  autoCapitalize="none"
-                />
               </>
             )}
           </View>

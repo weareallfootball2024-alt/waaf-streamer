@@ -231,6 +231,62 @@ export async function fetchActiveVkLive(
   }
 }
 
+export type VkLiveStartResult = {
+  ok: boolean;
+  rtmpUrl?: string;
+  streamKey?: string;
+  videoId?: number;
+  ownerId?: number;
+  postId?: number;
+  error?: string;
+};
+
+/** Как SportCam/stream.vi: создаёт трансляцию в VK, отдаёт RTMP + video_id для stopStreaming. */
+export async function startVkLiveBroadcast(opts: {
+  groupId: number;
+  name?: string;
+  wallpost?: boolean;
+}): Promise<VkLiveStartResult> {
+  const token = await getStoredVkToken();
+  if (!token) return { ok: false, error: 'no_vk_token' };
+  if (!opts.groupId) return { ok: false, error: 'no_group_id' };
+
+  try {
+    const res = await fetch(`${API_URL}/api/vk/stream/start`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-VK-Access-Token': token,
+      },
+      body: JSON.stringify({
+        group_id: opts.groupId,
+        name: opts.name || 'WAAF Live',
+        wallpost: !!opts.wallpost,
+        publish: true,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { ok: false, error: data.error || 'vk_start_failed' };
+    }
+    const rtmpUrl = String(data.rtmp_url || '').trim();
+    const streamKey = String(data.stream_key || '').trim();
+    if (!rtmpUrl || !streamKey) {
+      return { ok: false, error: 'vk_no_rtmp' };
+    }
+    return {
+      ok: true,
+      rtmpUrl,
+      streamKey,
+      videoId: data.video_id != null ? Number(data.video_id) : undefined,
+      ownerId: data.owner_id != null ? Number(data.owner_id) : undefined,
+      postId: data.post_id != null ? Number(data.post_id) : undefined,
+    };
+  } catch {
+    return { ok: false, error: 'network_error' };
+  }
+}
+
 export function vkStreamErrorMessage(error?: string): string {
   switch (error) {
     case 'no_vk_token':
@@ -239,6 +295,8 @@ export function vkStreamErrorMessage(error?: string): string {
       return 'Выберите сообщество VK.';
     case 'network_error':
       return 'Нет связи с сервером WAAF.';
+    case 'vk_no_rtmp':
+      return 'VK не выдал RTMP. Нужен scope video у приложения (devsupport@corp.vk.com).';
     default:
       return error || 'Неизвестная ошибка VK API';
   }
