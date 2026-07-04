@@ -4,6 +4,7 @@ import { ensureStoredVkUserId } from './vkAuth';
 
 export type StreamAccess = {
   can_stream_standalone: boolean;
+  can_open_settings?: boolean;
   standalone_match_price_rub: number;
   balance_rub?: number;
   balance_kopecks?: number;

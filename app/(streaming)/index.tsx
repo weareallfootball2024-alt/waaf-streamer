@@ -47,6 +47,8 @@ import {
   type ResolvedStreamQuality,
 } from '../../services/streamQuality';
 import { checkStreamReadiness } from '../../services/streamReadiness';
+import { canOpenStreamSettings } from '../../services/streamSettingsAccess';
+import { stopVkLiveBroadcast } from '../../services/vkAuth';
 import {
   getStreamPermissionState,
   requestStreamPermissions,
@@ -358,10 +360,20 @@ export default function App() {
   const [pendingStandaloneCtx, setPendingStandaloneCtx] = useState<StandaloneMatchContext | null>(null);
   const [standaloneAccess, setStandaloneAccess] = useState<StreamAccess | null>(null);
   const [waafLoginReturn, setWaafLoginReturn] = useState('auth_choice');
+  const [settingsAllowed, setSettingsAllowed] = useState(false);
 
   const openSettings = (returnTo = 'home') => {
       setSettingsReturnScreen(returnTo);
       setCurrentScreen('settings');
+  };
+
+  const tryOpenSettings = async (returnTo = 'home') => {
+      const access = await canOpenStreamSettings({ operatorToken, tokenType });
+      if (!access.allowed) {
+          Alert.alert('Настройки недоступны', access.reason);
+          return;
+      }
+      openSettings(returnTo);
   };
 
   const promptWaafLogin = (message: string, returnTo = 'step_standalone_club') => {
@@ -373,7 +385,6 @@ export default function App() {
                   setCurrentScreen('waaf_login');
               },
           },
-          { text: 'Настройки', onPress: () => openSettings(returnTo) },
           { text: 'OK', style: 'cancel' },
       ]);
   };
@@ -383,6 +394,12 @@ export default function App() {
       if (user || vkUserId) setCurrentScreen('auth_home');
     });
   }, []);
+
+  useEffect(() => {
+    if (currentScreen === 'auth_home') {
+      canOpenStreamSettings({ operatorToken, tokenType }).then((r) => setSettingsAllowed(r.allowed));
+    }
+  }, [currentScreen, operatorToken, tokenType]);
 
   useEffect(() => {
     const handleUrl = (url: string | null) => {
@@ -524,20 +541,6 @@ export default function App() {
 
   const handleTierSelect = async (tier: StandaloneTier) => {
       setStandaloneTier(tier);
-      if (tier === 'premium') {
-          const readiness = await checkStreamReadiness();
-          if (!readiness.ok) {
-              Alert.alert(
-                  'Сначала настройте трансляцию',
-                  readiness.message,
-                  [
-                      { text: 'В настройки', onPress: () => openSettings('standalone_tier') },
-                      { text: 'Отмена', style: 'cancel' },
-                  ],
-              );
-              return;
-          }
-      }
       setCurrentScreen('step_standalone_club');
   };
 
@@ -601,11 +604,7 @@ export default function App() {
               if (access.needs_auth) {
                   Alert.alert(
                       'Авторизация',
-                      access.reason || 'Войдите через VK в настройках стримера.',
-                      [
-                          { text: 'Настройки', onPress: () => openSettings('step_standalone_club') },
-                          { text: 'OK', style: 'cancel' },
-                      ],
+                      access.reason || 'Пополните баланс или войдите в WAAF как администратор.',
                   );
                   return;
               }
@@ -617,6 +616,20 @@ export default function App() {
               }
               Alert.alert('Нет доступа', access.reason || 'Трансляция недоступна');
               return;
+          }
+          if (ctx.tier !== 'free') {
+              const readiness = await checkStreamReadiness();
+              if (!readiness.ok) {
+                  const sa = await canOpenStreamSettings();
+                  Alert.alert(
+                      'Настройте трансляцию',
+                      readiness.message,
+                      sa.allowed
+                          ? [{ text: 'В настройки', onPress: () => tryOpenSettings('step_standalone_club') }, { text: 'OK', style: 'cancel' }]
+                          : [{ text: 'OK' }],
+                  );
+                  return;
+              }
           }
           const data = await createStandaloneLiveMatch(ctx);
           await enterStandaloneControl(data, ctx);
@@ -685,7 +698,8 @@ export default function App() {
           <AuthenticatedHomeScreen
               initialToken={pendingLinkToken}
               onBack={handleBackToStart}
-              onOpenSettings={() => openSettings('auth_home')}
+              onOpenSettings={() => tryOpenSettings('auth_home')}
+              showSettings={settingsAllowed}
               onTokenResolved={handleTokenResolved}
               onOutsideTournament={handleOutsideTournament}
           />
@@ -705,7 +719,7 @@ export default function App() {
           <TournamentLoginScreen
               onNext={goToMatchList}
               onStandalone={handleOutsideTournament}
-              onOpenSettings={() => openSettings('step1_tourn')}
+              onOpenSettings={() => tryOpenSettings('step1_tourn')}
               initialToken={pendingLinkToken}
           />
       );
@@ -716,7 +730,7 @@ export default function App() {
               standaloneTier={standaloneTier || 'premium'}
               onStart={startStandaloneMatch}
               onBack={() => setCurrentScreen(standaloneTier ? 'standalone_tier' : 'auth_home')}
-              onOpenSettings={() => openSettings('step_standalone_club')}
+              onOpenSettings={() => tryOpenSettings('step_standalone_club')}
           />
       );
   }
@@ -726,7 +740,7 @@ export default function App() {
               matchContext={pendingStandaloneCtx}
               access={standaloneAccess}
               onBack={() => setCurrentScreen('step_standalone_club')}
-              onOpenSettings={() => openSettings('step_standalone_pay')}
+              onOpenSettings={() => tryOpenSettings('step_standalone_pay')}
               onPaid={async () => {
                   try {
                       const data = await createStandaloneLiveMatch(pendingStandaloneCtx);
@@ -887,7 +901,20 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   const insets = useSafeAreaInsets();
   const videoRef = useRef<WaafLivestreamViewRef>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const openStreamSettings = () => setSettingsOpen(true);
+  const openStreamSettings = async () => {
+    const access = await canOpenStreamSettings({
+      operatorToken,
+      tokenType,
+      inMatchControl: true,
+      isStandaloneSession,
+      isFreeTier,
+    });
+    if (!access.allowed) {
+      Alert.alert('Настройки недоступны', access.reason);
+      return;
+    }
+    setSettingsOpen(true);
+  };
   const streamStatsRef = useRef({ videoFrames: 0 });
   const streamHealthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamSessionRef = useRef<{
@@ -1158,6 +1185,30 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     });
   };
 
+  const finishVkStudioBroadcast = async () => {
+    try {
+      const settings = await loadStreamSettings();
+      if (settings.activePlatform !== 'vk' || !settings.vk.communityId) return;
+      const result = await stopVkLiveBroadcast({
+        groupId: settings.vk.communityId,
+        embedUrl: settings.vk.embedUrl,
+      });
+      if (!result.ok && result.error !== 'no_vk_token') {
+        console.warn('[vk] stop broadcast:', result.error);
+      }
+    } catch (e) {
+      console.warn('[vk] stop broadcast failed', e);
+    }
+  };
+
+  const stopLiveStreamCompletely = async () => {
+    await videoRef.current?.stopStreaming();
+    setIsStreaming(false);
+    wasStreamingRef.current = false;
+    stopStreamTick();
+    await finishVkStudioBroadcast();
+  };
+
   const stopStreamTick = () => {
     if (streamTickRef.current) {
       clearInterval(streamTickRef.current);
@@ -1244,10 +1295,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
 
     if (isStreaming) {
         try {
-            await videoRef.current?.stopStreaming();
-            setIsStreaming(false);
-            wasStreamingRef.current = false;
-            stopStreamTick();
+            await stopLiveStreamCompletely();
             if (streamSessionRef.current) {
               streamSecondsRef.current = Math.max(
                 streamSecondsRef.current,
@@ -1257,7 +1305,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             sendStreamHeartbeat({ is_streaming: false, stream_disconnected: true });
             sendUpdate({ status: 'scheduled' });
             await finishAutoQualitySession(false);
-            Alert.alert("Эфир остановлен");
+            Alert.alert("Эфир остановлен", "RTMP отключён. Трансляция в VK Studio завершена, если был доступ к API.");
         } catch (e: any) {
             Alert.alert("Ошибка остановки", e.message);
         } finally { setIsLoading(false); }
@@ -1483,7 +1531,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
               Alert.alert('Ничья!', drawEt ? 'Начинается доп. время' : 'Начинается серия пенальти');
           } else {
               setPeriod(8);
-              if (isStreaming) { videoRef.current?.stopStreaming(); setIsStreaming(false); }
+              if (isStreaming) { void stopLiveStreamCompletely(); }
               sendUpdate({ period: 8, status: 'finished' }, 'end_match');
               Alert.alert('Матч завершён!');
           }
@@ -1504,7 +1552,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
               Alert.alert('Ничья!', drawEt ? 'Начинается доп. время' : 'Начинается серия пенальти');
           } else {
               setPeriod(8);
-              if (isStreaming) { videoRef.current?.stopStreaming(); setIsStreaming(false); }
+              if (isStreaming) { void stopLiveStreamCompletely(); }
               sendUpdate({ period: 8, status: 'finished' }, 'end_match');
               Alert.alert("Матч завершен");
           }
@@ -1570,7 +1618,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
               Alert.alert('Ничья в ДВ!', 'Начинается серия пенальти');
           } else {
               setPeriod(8);
-              if (isStreaming) { videoRef.current?.stopStreaming(); setIsStreaming(false); }
+              if (isStreaming) { void stopLiveStreamCompletely(); }
               sendUpdate({ period: 8, status: 'finished' }, 'end_match');
               Alert.alert('Матч завершён!');
           }
@@ -1808,7 +1856,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       <SafeAreaView style={[styles.overlay, { paddingTop: Math.max(insets.top, 4), paddingLeft: Math.max(insets.left, 8), paddingRight: Math.max(insets.right, 8) }]} pointerEvents="box-none">
         
       <View style={styles.header}>
-            <TouchableOpacity onPress={() => { if(isStreaming) { videoRef.current?.stopStreaming(); setIsStreaming(false); } onBack(); }} style={styles.backButton}><Text style={styles.backText}>{isStandaloneSession || isFreeTier ? 'ВЫХОД' : 'К РАСПИСАНИЮ'}</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => { if (isStreaming) void stopLiveStreamCompletely(); onBack(); }} style={styles.backButton}><Text style={styles.backText}>{isStandaloneSession || isFreeTier ? 'ВЫХОД' : 'К РАСПИСАНИЮ'}</Text></TouchableOpacity>
             <TouchableOpacity onPress={handleUndo} style={styles.undoButton}><Text style={styles.undoText}>↩ ОТМЕНА</Text></TouchableOpacity>
             <View style={styles.timerBox}><Text style={styles.timerText}>{formatTimer(displaySeconds)}</Text><Text style={styles.periodText}>{period === 0 ? 'Разминка' : period === 1 ? '1-й Тайм' : period === 2 ? 'Перерыв' : period === 3 ? '2-й Тайм' : period === 4 ? 'Перерыв (ДВ)' : period === 5 ? 'Доп. время 1' : period === 6 ? 'Доп. время 2' : period === 7 ? '⚽ Пенальти' : 'Завершён'}</Text></View>
             <View style={styles.headerInfo}><Text style={styles.matchTitle}>{match.team_home} vs {match.team_away}</Text></View>
@@ -1919,7 +1967,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                         setIsTimerRunning(false);
                         setPeriod(8);
                         matchApi(`/api/match/${match.id}/timer/pause`, { method: 'POST' });
-                        if (isStreaming) { videoRef.current?.stopStreaming(); setIsStreaming(false); }
+                        if (isStreaming) { void stopLiveStreamCompletely(); }
                         sendUpdate({
                             period: 8,
                             status: 'finished',

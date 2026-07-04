@@ -155,3 +155,58 @@ export async function resolveCommunity(input: string, accessToken?: string): Pro
   if (!data.group) throw new Error('Сообщество не найдено');
   return data.group;
 }
+
+export function parseVkVideoRef(
+  input?: string | null,
+): { groupId: number; videoId: number } | null {
+  const raw = String(input || '').trim();
+  if (!raw) return null;
+  const m = raw.match(/video(-?\d+)_(\d+)/i);
+  if (!m) return null;
+  const owner = parseInt(m[1], 10);
+  const videoId = parseInt(m[2], 10);
+  if (!Number.isFinite(owner) || !Number.isFinite(videoId)) return null;
+  const groupId = owner < 0 ? Math.abs(owner) : owner;
+  return { groupId, videoId };
+}
+
+export async function stopVkLiveBroadcast(opts: {
+  groupId?: number;
+  videoId?: number;
+  embedUrl?: string;
+}): Promise<{ ok: boolean; videoId?: number; error?: string }> {
+  const token = await getStoredVkToken();
+  if (!token) return { ok: false, error: 'no_vk_token' };
+
+  let groupId = opts.groupId;
+  let videoId = opts.videoId;
+  if ((!groupId || !videoId) && opts.embedUrl) {
+    const parsed = parseVkVideoRef(opts.embedUrl);
+    if (parsed) {
+      groupId = groupId || parsed.groupId;
+      videoId = videoId || parsed.videoId;
+    }
+  }
+  if (!groupId) return { ok: false, error: 'no_group_id' };
+
+  try {
+    const res = await fetch(`${API_URL}/api/vk/stream/stop`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-VK-Access-Token': token,
+      },
+      body: JSON.stringify({
+        group_id: groupId,
+        video_id: videoId || undefined,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { ok: false, error: data.error || 'vk_stop_failed' };
+    }
+    return { ok: true, videoId: data.video_id };
+  } catch {
+    return { ok: false, error: 'network_error' };
+  }
+}

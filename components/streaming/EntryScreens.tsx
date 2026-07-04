@@ -357,6 +357,7 @@ type AuthHomeProps = {
   initialToken?: string;
   onBack: () => void;
   onOpenSettings: () => void;
+  showSettings?: boolean;
   onTokenResolved: (tournamentId: string, token: string, tokenType: TokenType) => void;
   onOutsideTournament: () => void;
 };
@@ -365,6 +366,7 @@ export function AuthenticatedHomeScreen({
   initialToken = '',
   onBack,
   onOpenSettings,
+  showSettings = true,
   onTokenResolved,
   onOutsideTournament,
 }: AuthHomeProps) {
@@ -418,9 +420,11 @@ export function AuthenticatedHomeScreen({
       <TouchableOpacity onPress={onBack}>
         <Text style={styles.back}>◀ ВЫХОД ИЗ АККАУНТА</Text>
       </TouchableOpacity>
-      <TouchableOpacity onPress={onOpenSettings} style={{ marginBottom: 16 }}>
-        <Text style={{ color: '#4a90e2', fontWeight: 'bold' }}>⚙ НАСТРОЙКИ ТРАНСЛЯЦИИ</Text>
-      </TouchableOpacity>
+      {showSettings ? (
+        <TouchableOpacity onPress={onOpenSettings} style={{ marginBottom: 16 }}>
+          <Text style={{ color: '#4a90e2', fontWeight: 'bold' }}>⚙ НАСТРОЙКИ ТРАНСЛЯЦИИ</Text>
+        </TouchableOpacity>
+      ) : null}
 
       <Text style={styles.title}>Личный кабинет</Text>
       <Text style={styles.subtitle}>Токен турнира или матч вне турнира</Text>

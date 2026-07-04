@@ -3,7 +3,7 @@
   "scheme": "waafstreamer",
     "name": "WAAF Streamer",
     "slug": "waaf-streamer",
-    "version": "1.0.32",
+    "version": "1.0.33",
     "orientation": "landscape",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
