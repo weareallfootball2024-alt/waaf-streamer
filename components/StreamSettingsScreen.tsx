@@ -632,14 +632,15 @@ export function StreamSettingsScreen({ onClose }: Props) {
 
             {hasCommunity && (
               <>
-                <Text style={[styles.blockTitle, { marginTop: 16 }]}>Трансляция VK</Text>
+                <Text style={[styles.blockTitle, { marginTop: 16 }]}>RTMP и ключ</Text>
                 <Text style={[styles.hint, { marginBottom: 8 }]}>
+                  Как в SportCam / StreamVi: вставьте URL и ключ (из VK Studio или из StreamVi → «Настройки» → сервер и ключ).
                   {vkLoggedIn
-                    ? 'При ЭФИР приложение создаёт трансляцию через VK API (как SportCam): ключи и завершение по СТОП — автоматически. Поля RTMP ниже — только запасной вариант.'
-                    : 'Войдите через VK выше — тогда ключи и завершение эфира работают автоматически. Без VK — вставьте RTMP из Studio вручную.'}
+                    ? ' Сообщество привязано — СТОП завершит эфир в VK через API (как StreamVi на сервере).'
+                    : ' Войдите через VK и выберите сообщество — тогда СТОП завершит эфир в Studio без ручных действий.'}
                 </Text>
 
-                <Text style={[styles.blockTitle, { marginTop: 8 }]}>Куда публикуется эфир</Text>
+                <Text style={[styles.blockTitle, { marginTop: 8 }]}>Куда в VK</Text>
                 <View style={styles.platformRow}>
                   <TouchableOpacity
                     style={[styles.platformChip, vk.streamTarget === 'wall' && styles.platformChipActive]}
@@ -661,16 +662,14 @@ export function StreamSettingsScreen({ onClose }: Props) {
 
                 <Text style={[styles.hint, { marginBottom: 10 }]}>
                   {vk.streamTarget === 'playlist'
-                    ? 'С входом через VK: пост на стене создаётся при ЭФИР (wallpost). Без VK — создайте трансляцию в Studio и вставьте RTMP вручную.'
-                    : 'Постоянный ключ Studio — только раздел «Видео», не стена. Для стены выберите «Пост на стене» и войдите через VK.'}
+                    ? 'Пост на стене: привяжите сообщество через VK. Если RTMP не задан — ключи выдаст VK API при ЭФИР.'
+                    : 'Постоянный ключ VK Studio → раздел «Видео». На стену не попадает (ограничение VK).'}
                 </Text>
-
-                <Text style={[styles.blockTitle, { marginTop: 4 }]}>Запасные ключи Studio (необязательно)</Text>
 
                 {vk.streamTarget === 'wall' && (
                   <>
                     <Text style={styles.hint}>
-                      Studio → Ключи и виджеты. Используйте, если VK API недоступен (нет scope video).
+                      VK Studio → Ключи и виджеты (или ключи StreamVi, если рестримите через них).
                     </Text>
                     <TextInput
                       style={styles.input}
@@ -695,7 +694,7 @@ export function StreamSettingsScreen({ onClose }: Props) {
                 {vk.streamTarget === 'playlist' && (
                   <>
                     <Text style={styles.hint}>
-                      Studio → Трансляции. Только если VK API не сработал — вставьте RTMP вручную.
+                      Для стены: войдите через VK, выберите сообщество. RTMP можно не вводить — выдастся при ЭФИР. Или вставьте ключ из Studio / StreamVi.
                     </Text>
                     {albumsLoading && <ActivityIndicator color="#888" style={{ marginBottom: 8 }} />}
                     {albums.length > 0 && (
@@ -733,7 +732,7 @@ export function StreamSettingsScreen({ onClose }: Props) {
                       secureTextEntry
                     />
                     <TouchableOpacity style={styles.btnApply} onPress={applyPlaylistRtmp}>
-                      <Text style={styles.btnApplyText}>ПРИМЕНИТЬ ЗАПАСНЫЕ КЛЮЧИ</Text>
+                      <Text style={styles.btnApplyText}>ПРИМЕНИТЬ КЛЮЧИ ДЛЯ ЭФИРА</Text>
                     </TouchableOpacity>
                   </>
                 )}

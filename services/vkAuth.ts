@@ -231,6 +231,25 @@ export async function fetchActiveVkLive(
   }
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** После появления RTMP-сигнала VK создаёт объект трансляции — ищем с паузами. */
+export async function resolveActiveVkLiveWithRetry(
+  groupId: number,
+  opts: { attempts?: number; delayMs?: number } = {},
+): Promise<{ videoId: number; ownerId: number; embedUrl: string } | null> {
+  const attempts = opts.attempts ?? 12;
+  const delayMs = opts.delayMs ?? 4000;
+  for (let i = 0; i < attempts; i++) {
+    const active = await fetchActiveVkLive(groupId);
+    if (active) return active;
+    if (i < attempts - 1) await sleep(delayMs);
+  }
+  return null;
+}
+
 export type VkLiveStartResult = {
   ok: boolean;
   rtmpUrl?: string;
