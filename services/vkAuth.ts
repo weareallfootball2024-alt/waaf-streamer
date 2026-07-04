@@ -211,58 +211,23 @@ export async function stopVkLiveBroadcast(opts: {
   }
 }
 
-export type VkLiveStartResult = {
-  ok: boolean;
-  rtmpUrl?: string;
-  streamKey?: string;
-  videoId?: number;
-  ownerId?: number;
-  postId?: number;
-  error?: string;
-};
-
-export async function startVkLiveBroadcast(opts: {
-  groupId: number;
-  name?: string;
-  wallpost?: boolean;
-}): Promise<VkLiveStartResult> {
+export async function fetchActiveVkLive(
+  groupId: number,
+): Promise<{ videoId: number; ownerId: number; embedUrl: string } | null> {
   const token = await getStoredVkToken();
-  if (!token) return { ok: false, error: 'no_vk_token' };
-  if (!opts.groupId) return { ok: false, error: 'no_group_id' };
-
+  if (!token || !groupId) return null;
   try {
-    const res = await fetch(`${API_URL}/api/vk/stream/start`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-VK-Access-Token': token,
-      },
-      body: JSON.stringify({
-        group_id: opts.groupId,
-        name: opts.name || 'WAAF Live',
-        wallpost: !!opts.wallpost,
-        publish: true,
-      }),
+    const qs = new URLSearchParams({ group_id: String(groupId) });
+    const res = await fetch(`${API_URL}/api/vk/stream/active?${qs.toString()}`, {
+      headers: { 'X-VK-Access-Token': token },
     });
     const data = await res.json();
-    if (!res.ok) {
-      return { ok: false, error: data.error || 'vk_start_failed' };
-    }
-    const rtmpUrl = String(data.rtmp_url || '').trim();
-    const streamKey = String(data.stream_key || '').trim();
-    if (!rtmpUrl || !streamKey) {
-      return { ok: false, error: 'vk_no_rtmp' };
-    }
-    return {
-      ok: true,
-      rtmpUrl,
-      streamKey,
-      videoId: data.video_id != null ? Number(data.video_id) : undefined,
-      ownerId: data.owner_id != null ? Number(data.owner_id) : undefined,
-      postId: data.post_id != null ? Number(data.post_id) : undefined,
-    };
+    if (!res.ok || !data.active || data.video_id == null) return null;
+    const ownerId = data.owner_id != null ? Number(data.owner_id) : -groupId;
+    const embedUrl = data.embed_url || `https://vk.com/video${ownerId}_${data.video_id}`;
+    return { videoId: Number(data.video_id), ownerId, embedUrl };
   } catch {
-    return { ok: false, error: 'network_error' };
+    return null;
   }
 }
 
@@ -274,8 +239,6 @@ export function vkStreamErrorMessage(error?: string): string {
       return 'Выберите сообщество VK.';
     case 'network_error':
       return 'Нет связи с сервером WAAF.';
-    case 'vk_no_rtmp':
-      return 'VK не вернул RTMP-адрес. Проверьте scope video у приложения.';
     default:
       return error || 'Неизвестная ошибка VK API';
   }

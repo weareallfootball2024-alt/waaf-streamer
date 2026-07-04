@@ -632,39 +632,19 @@ export function StreamSettingsScreen({ onClose }: Props) {
 
             {hasCommunity && (
               <>
-                <Text style={[styles.blockTitle, { marginTop: 16 }]}>Способ запуска</Text>
-                <View style={styles.platformRow}>
-                  <TouchableOpacity
-                    style={[styles.platformChip, vk.streamSource !== 'manual' && styles.platformChipActive]}
-                    onPress={() => updatePlatform('vk', { streamSource: 'api' })}
-                  >
-                    <Text style={[styles.platformChipText, vk.streamSource !== 'manual' && styles.platformChipTextActive]}>
-                      Авто VK (на стену)
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.platformChip, vk.streamSource === 'manual' && styles.platformChipActive]}
-                    onPress={() => updatePlatform('vk', { streamSource: 'manual' })}
-                  >
-                    <Text style={[styles.platformChipText, vk.streamSource === 'manual' && styles.platformChipTextActive]}>
-                      Вручную (Studio)
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+                <Text style={[styles.blockTitle, { marginTop: 16 }]}>Ключи из VK Studio</Text>
                 <Text style={[styles.hint, { marginBottom: 8 }]}>
-                  {vk.streamSource === 'api'
-                    ? 'Приложение создаёт трансляцию через VK API, публикует на стену и завершает её по СТОП. Нужен scope video (перелогиньтесь через VK после обновления).'
-                    : 'Ключи из VK Studio. СТОП отключает RTMP — в Studio может понадобиться «Завершить трансляцию» вручную.'}
+                  RTMP и ключ копируются из Studio. СТОП в приложении завершает трансляцию через VK API (нужен вход через VK).
                 </Text>
 
-                <Text style={[styles.blockTitle, { marginTop: 8 }]}>Куда в сообществе</Text>
+                <Text style={[styles.blockTitle, { marginTop: 8 }]}>Куда публикуется эфир</Text>
                 <View style={styles.platformRow}>
                   <TouchableOpacity
                     style={[styles.platformChip, vk.streamTarget === 'wall' && styles.platformChipActive]}
                     onPress={() => setStreamTarget('wall')}
                   >
                     <Text style={[styles.platformChipText, vk.streamTarget === 'wall' && styles.platformChipTextActive]}>
-                      На стену (постоянный ключ)
+                      Постоянный ключ
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
@@ -672,16 +652,16 @@ export function StreamSettingsScreen({ onClose }: Props) {
                     onPress={() => setStreamTarget('playlist')}
                   >
                     <Text style={[styles.platformChipText, vk.streamTarget === 'playlist' && styles.platformChipTextActive]}>
-                      Плейлист / трансляция
+                      Трансляция на стену
                     </Text>
                   </TouchableOpacity>
                 </View>
 
                 <Text style={[styles.hint, { marginBottom: 10 }]}>
-                  Счёт и таймер вшиваются в видео на телефоне и уходят в VK вместе с эфиром.
+                  Постоянный ключ — эфир попадает в раздел «Видео», не на главную стену. Для поста на стене: режим «Трансляция на стену» → в Studio создайте трансляцию с публикацией на стену → «В эфир».
                 </Text>
 
-                {vk.streamTarget === 'wall' && vk.streamSource === 'manual' && (
+                {vk.streamTarget === 'wall' && (
                   <>
                     <Text style={styles.hint}>
                       Кабинет СООБЩЕСТВА в Studio → Ключи и виджеты. Постоянный ключ не всегда создаёт пост на стене автоматически.
@@ -709,10 +689,10 @@ export function StreamSettingsScreen({ onClose }: Props) {
                   </>
                 )}
 
-                {vk.streamTarget === 'playlist' && vk.streamSource === 'manual' && (
+                {vk.streamTarget === 'playlist' && (
                   <>
                     <Text style={styles.hint}>
-                      Создайте или выберите трансляцию в VK Studio, скопируйте её RTMP — ключ новый для каждого эфира.
+                      Studio → Трансляции → создать эфир с публикацией на стену → скопировать RTMP. После подключения нажмите «В эфир» в Studio.
                     </Text>
                     {albumsLoading && <ActivityIndicator color="#888" style={{ marginBottom: 8 }} />}
                     {albums.length > 0 && (
@@ -755,21 +735,17 @@ export function StreamSettingsScreen({ onClose }: Props) {
                   </>
                 )}
 
-                {vk.streamSource === 'manual' && (
-                  <>
-                    <Text style={[styles.hint, { marginTop: 12 }]}>
-                      Ссылка на трансляцию (video-123_456) — для авто-завершения в Studio при СТОП:
-                    </Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="https://vk.com/video-123_456"
-                      placeholderTextColor="#666"
-                      value={vk.embedUrl}
-                      onChangeText={(t) => updatePlatform('vk', { embedUrl: t })}
-                      autoCapitalize="none"
-                    />
-                  </>
-                )}
+                <Text style={[styles.hint, { marginTop: 12 }]}>
+                  Ссылка на трансляцию (video-123_456) — если СТОП не завершает эфир в Studio автоматически:
+                </Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="https://vk.com/video-123_456"
+                  placeholderTextColor="#666"
+                  value={vk.embedUrl}
+                  onChangeText={(t) => updatePlatform('vk', { embedUrl: t })}
+                  autoCapitalize="none"
+                />
               </>
             )}
           </View>

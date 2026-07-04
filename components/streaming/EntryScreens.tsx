@@ -418,7 +418,7 @@ export function AuthenticatedHomeScreen({
   return (
     <ScrollView style={{ flex: 1, backgroundColor: '#121212' }} contentContainerStyle={{ padding: 24, paddingTop: 48 }}>
       <TouchableOpacity onPress={onBack}>
-        <Text style={styles.back}>◀ ВЫХОД ИЗ АККАУНТА</Text>
+        <Text style={styles.back}>◀ СМЕНИТЬ АККАУНТ</Text>
       </TouchableOpacity>
       {showSettings ? (
         <TouchableOpacity onPress={onOpenSettings} style={{ marginBottom: 16 }}>

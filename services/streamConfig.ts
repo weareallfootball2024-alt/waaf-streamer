@@ -35,9 +35,7 @@ function normalizeVkConfig(vk: Partial<VkPlatformConfig> | undefined): VkPlatfor
   if (!base.streamTarget) {
     base.streamTarget = 'wall';
   }
-  if (!base.streamSource) {
-    base.streamSource = 'api';
-  }
+  base.streamSource = 'manual';
   return base;
 }
 
@@ -104,10 +102,6 @@ export function getActiveRtmpConfig(
   if (platform === 'vk') {
     if (!settings.vk.communityId) return null;
 
-    if (settings.vk.streamSource === 'api') {
-      return { rtmpUrl: '', streamKey: '', platform };
-    }
-
     if (settings.vk.streamTarget === 'playlist') {
       const session = getPlaylistSessionRtmp();
       if (!session) return null;
@@ -140,9 +134,6 @@ export function getStreamSetupHint(settings: StreamSettings): string {
   if (!settings.vk.communityId) {
     return 'Войдите через VK и выберите сообщество в настройках трансляции';
   }
-  if (settings.vk.streamSource === 'api') {
-    return 'Режим «Авто VK»: нажмите ЭФИР — приложение создаст трансляцию и опубликует на стену (нужен scope video у приложения VK)';
-  }
   if (settings.vk.streamTarget === 'playlist') {
     return 'Вставьте RTMP URL и ключ из VK Studio для этой трансляции (режим плейлист) и нажмите «Применить для эфира»';
   }
@@ -159,8 +150,5 @@ export function getVkShareUrl(settings: StreamSettings): string | null {
 }
 
 export function isStreamConfigured(settings: StreamSettings): boolean {
-  if (settings.activePlatform === 'vk' && settings.vk.communityId && settings.vk.streamSource === 'api') {
-    return true;
-  }
   return getActiveRtmpConfig(settings) !== null;
 }
