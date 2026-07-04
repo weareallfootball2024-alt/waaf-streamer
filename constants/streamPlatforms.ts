@@ -4,6 +4,22 @@ export type StreamPlatform = 'vk' | 'youtube' | 'rutube' | 'waaf';
 
 export type StreamQuality = 'high' | 'medium' | 'low' | 'auto';
 
+export type ScoreboardLayout = 'full' | 'center' | 'left' | 'right';
+
+export const SCOREBOARD_LAYOUT_LABELS: Record<ScoreboardLayout, string> = {
+  full: 'Во всю ширину',
+  center: 'По центру',
+  left: 'Слева',
+  right: 'Справа',
+};
+
+export const SCOREBOARD_LAYOUT_HINTS: Record<ScoreboardLayout, string> = {
+  full: 'Полоса табло на всю ширину кадра',
+  center: 'Компактное табло по центру сверху',
+  left: 'Компактное табло у левого края',
+  right: 'Компактное табло у правого края',
+};
+
 export const STREAM_QUALITY_LABELS: Record<StreamQuality, string> = {
   high: 'Высокое',
   medium: 'Среднее',
@@ -43,6 +59,7 @@ export type AdClipPreset = {
 export type StreamSettings = {
   activePlatform: StreamPlatform;
   streamQuality: StreamQuality;
+  scoreboardLayout: ScoreboardLayout;
   replayEnabled: boolean;
   replaySeconds: number;
   adClips: AdClipPreset[];
@@ -73,6 +90,7 @@ export const REPLAY_SECONDS_OPTIONS = [5, 10, 15] as const;
 export const DEFAULT_STREAM_SETTINGS: StreamSettings = {
   activePlatform: 'vk',
   streamQuality: 'auto',
+  scoreboardLayout: 'center',
   replayEnabled: true,
   replaySeconds: 10,
   adClips: [],

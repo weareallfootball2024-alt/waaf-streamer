@@ -37,9 +37,14 @@ internal class ReplayRingBuffer(
     audioFormat = MediaFormat(format)
   }
 
+  @Volatile
+  var lastVideoPtsUs: Long = 0
+
   @Synchronized
   fun addVideo(buffer: ByteBuffer, info: MediaCodec.BufferInfo) {
     if (info.size <= 0) return
+    if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) return
+    lastVideoPtsUs = info.presentationTimeUs
     videoFrames.addLast(copyFrame(buffer, info))
     trim(videoFrames)
   }
@@ -47,6 +52,7 @@ internal class ReplayRingBuffer(
   @Synchronized
   fun addAudio(buffer: ByteBuffer, info: MediaCodec.BufferInfo) {
     if (info.size <= 0) return
+    if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) return
     audioFrames.addLast(copyFrame(buffer, info))
     trim(audioFrames)
   }
@@ -67,6 +73,7 @@ internal class ReplayRingBuffer(
     audioFrames.clear()
     videoFormat = null
     audioFormat = null
+    lastVideoPtsUs = 0
   }
 
   private fun trim(frames: ArrayDeque<EncodedFrame>) {

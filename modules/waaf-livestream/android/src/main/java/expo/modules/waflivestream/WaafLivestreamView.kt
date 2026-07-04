@@ -1,7 +1,6 @@
 package expo.modules.waflivestream
 
 import android.content.Context
-import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.os.Build
 import android.os.Handler
@@ -15,12 +14,12 @@ import com.pedro.common.ConnectChecker
 import com.pedro.encoder.input.gl.render.filters.`object`.ImageObjectFilterRender
 import com.pedro.encoder.input.sources.audio.MicrophoneSource
 import com.pedro.encoder.input.sources.video.Camera2Source
+import com.pedro.encoder.utils.gl.AspectRatioMode
 import com.pedro.encoder.utils.gl.TranslateTo
 import com.pedro.library.generic.GenericStream
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
-import java.io.File
 import java.util.concurrent.Executors
 
 @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
@@ -44,6 +43,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   private var isPrepared = false
   private var isMuted = false
   private var scoreboardReady = false
+  private var scoreboardLayout = ScoreboardLayout.FULL
   private var encoderQuality: StreamQualityPreset = StreamQualityPreset.MEDIUM
   private var surfaceReady = false
 
@@ -126,8 +126,8 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   }
 
   private val replayRingBuffer = ReplayRingBuffer()
-  private val replayExecutor = Executors.newSingleThreadExecutor()
   private lateinit var videoInjector: VideoInjector
+  private lateinit var replayDirectPlayer: ReplayDirectPlayer
   private var replayControllerAttached = false
 
   private val genericStream: GenericStream = GenericStream(
@@ -136,7 +136,10 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     Camera2Source(context),
     microphoneSource,
   ).apply {
-    getGlInterface().autoHandleOrientation = true
+    getGlInterface().apply {
+      autoHandleOrientation = true
+      setAspectRatioMode(AspectRatioMode.Fill)
+    }
     getStreamClient().apply {
       setReTries(3)
       setDelay(300)
@@ -155,6 +158,36 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   }
 
   init {
+    replayDirectPlayer = ReplayDirectPlayer(
+      stream = genericStream,
+      ringBuffer = replayRingBuffer,
+      mainHandler = mainHandler,
+      object : ReplayDirectPlayer.Callbacks {
+        override fun onInsertStarted() {
+          post { onVideoInsertStarted(mapOf("kind" to "replay", "loop" to false)) }
+        }
+
+        override fun onInsertEnded() {
+          post { onVideoInsertEnded(mapOf("kind" to "replay")) }
+        }
+
+        override fun onInsertError(code: String) {
+          post { onVideoInsertError(mapOf("code" to code)) }
+        }
+
+        override fun isMicMuted(): Boolean = isMuted
+
+        override fun setMicMuted(muted: Boolean) = setMicrophoneMuted(muted)
+
+        override fun scheduleScoreboardRestore() {
+          scoreboardReady = false
+          if (genericStream.isStreaming) {
+            mainHandler.postDelayed(deferredFilterRunnable, 400)
+          }
+        }
+      },
+    )
+
     videoInjector = VideoInjector(
       context,
       genericStream,
@@ -205,7 +238,9 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
       override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
         if (width > 0 && height > 0) {
           try {
-            genericStream.getGlInterface().setPreviewResolution(width, height)
+            val previewW = encoderQuality.width
+            val previewH = encoderQuality.height
+            genericStream.getGlInterface().setPreviewResolution(previewW, previewH)
           } catch (e: Exception) {
             Log.w(TAG, "setPreviewResolution failed", e)
           }
@@ -254,44 +289,16 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
       post { onVideoInsertError(mapOf("code" to "not_streaming")) }
       return
     }
-    if (videoInjector.isActive) {
+    if (videoInjector.isActive || replayDirectPlayer.isActive) {
       post { onVideoInsertError(mapOf("code" to "insert_active")) }
       return
     }
 
     val clipSeconds = seconds.coerceIn(1, 15)
-    replayExecutor.execute {
-      try {
-        val snapshot = replayRingBuffer.snapshot()
-        if (snapshot.videoFrames.isEmpty()) {
-          mainHandler.post { onVideoInsertError(mapOf("code" to "replay_buffer_empty")) }
-          return@execute
-        }
-
-        val file = File(context.cacheDir, "replay_${System.currentTimeMillis()}.mp4")
-        val ok = ReplayExporter.exportLastSeconds(snapshot, clipSeconds, file.absolutePath)
-        if (!ok) {
-          mainHandler.post { onVideoInsertError(mapOf("code" to "replay_export_failed")) }
-          return@execute
-        }
-
-        mainHandler.post {
-          post { onReplaySaved(mapOf("uri" to file.absolutePath)) }
-          videoInjector.play(file.absolutePath, false, "replay")
-        }
-      } catch (e: Exception) {
-        Log.e(TAG, "triggerReplay failed", e)
-        mainHandler.post {
-          onVideoInsertError(mapOf("code" to (e.message ?: "replay_failed")))
-        }
-      }
-    }
+    replayDirectPlayer.play(replayRingBuffer.snapshot(), clipSeconds)
   }
 
-  private fun videoRotation(): Int {
-    val o = context.resources.configuration.orientation
-    return if (o == Configuration.ORIENTATION_LANDSCAPE) 90 else 0
-  }
+  private fun videoRotation(): Int = 0
 
   private fun prepareEncoder(requested: StreamQualityPreset): Boolean {
     if (isPrepared && encoderQuality == requested) return true
@@ -326,6 +333,10 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
       if (ok) {
         encoderQuality = preset
         isPrepared = true
+        try {
+          genericStream.getGlInterface().setPreviewResolution(preset.width, preset.height)
+        } catch (_: Exception) {
+        }
         Log.i(
           TAG,
           "encoder prepared ${preset.width}x${preset.height} ${preset.bitrate}bps rotation=$rotation",
@@ -380,16 +391,32 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     if (scoreboardReady || !genericStream.isStreaming) return
     setupScoreboardFilter()
     scoreboardReady = true
-    Log.i(TAG, "scoreboard filter applied")
+    refreshScoreboardBitmap()
+    Log.i(TAG, "scoreboard filter applied layout=$scoreboardLayout")
   }
 
   private fun setupScoreboardFilter() {
     val filter = ImageObjectFilterRender()
     scoreboardFilter = filter
     genericStream.getGlInterface().setFilter(filter)
-    filter.setImage(buildScoreboardBitmap())
-    filter.setScale(96f, 22f)
-    filter.setPosition(TranslateTo.TOP)
+    applyScoreboardLayoutToFilter(filter)
+  }
+
+  private fun applyScoreboardLayoutToFilter(filter: ImageObjectFilterRender) {
+    val streamW = encoderQuality.width
+    val streamH = encoderQuality.height
+    val bitmap = buildScoreboardBitmap()
+    val scaleX = bitmap.width * 100f / streamW
+    val scaleY = bitmap.height * 100f / streamH
+    filter.setImage(bitmap)
+    filter.setScale(scaleX, scaleY)
+    when (scoreboardLayout) {
+      ScoreboardLayout.FULL -> filter.setPosition(TranslateTo.TOP)
+      ScoreboardLayout.CENTER -> filter.setPosition(50f - scaleX / 2f, 3f)
+      ScoreboardLayout.LEFT -> filter.setPosition(TranslateTo.TOP_LEFT)
+      ScoreboardLayout.RIGHT -> filter.setPosition(TranslateTo.TOP_RIGHT)
+    }
+    Log.d(TAG, "scoreboard scale=${scaleX}x${scaleY} stream=${streamW}x${streamH} bmp=${bitmap.width}x${bitmap.height}")
   }
 
   private fun buildScoreboardBitmap(): Bitmap {
@@ -402,13 +429,22 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
       periodText,
       logoHomeBitmap,
       logoAwayBitmap,
+      scoreboardLayout,
+      encoderQuality.width,
     )
   }
 
   private fun refreshScoreboardBitmap() {
-    val filter = scoreboardFilter
-    if (filter != null) {
-      filter.setImage(buildScoreboardBitmap())
+    val filter = scoreboardFilter ?: return
+    applyScoreboardLayoutToFilter(filter)
+  }
+
+  fun setScoreboardLayout(layout: String) {
+    val next = ScoreboardLayout.from(layout)
+    if (next == scoreboardLayout) return
+    scoreboardLayout = next
+    if (scoreboardReady) {
+      refreshScoreboardBitmap()
     }
   }
 
@@ -504,6 +540,9 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   fun stopStreaming() {
     if (::videoInjector.isInitialized && videoInjector.isActive) {
       videoInjector.stop()
+    }
+    if (::replayDirectPlayer.isInitialized) {
+      replayDirectPlayer.cancel()
     }
     mainHandler.removeCallbacks(publishRunnable)
     mainHandler.removeCallbacks(deferredFilterRunnable)
@@ -603,7 +642,6 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     if (::videoInjector.isInitialized && videoInjector.isActive) {
       videoInjector.stop()
     }
-    replayExecutor.shutdownNow()
     replayRingBuffer.clear()
     mainHandler.removeCallbacks(publishRunnable)
     mainHandler.removeCallbacks(deferredFilterRunnable)

@@ -27,7 +27,7 @@ import { StandaloneMatchSetupScreen } from '../../components/StandaloneMatchSetu
 import { StandalonePayScreen } from '../../components/StandalonePayScreen';
 import { StreamSettingsScreen } from '../../components/StreamSettingsScreen';
 import { VideoInsertSheet, pickVideoFromLibrary } from '../../components/VideoInsertSheet';
-import type { AdClipPreset } from '../../constants/streamPlatforms';
+import type { AdClipPreset, ScoreboardLayout } from '../../constants/streamPlatforms';
 import {
   fetchTournamentMatches,
   operatorFetch,
@@ -903,6 +903,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   const [streamHealth, setStreamHealth] = useState('');
   const [encoderQuality, setEncoderQuality] = useState<ResolvedStreamQuality>('medium');
   const streamQualitySettingRef = useRef<StreamQuality>('auto');
+  const [scoreboardLayout, setScoreboardLayout] = useState<ScoreboardLayout>('center');
   const [adClips, setAdClips] = useState<AdClipPreset[]>([]);
   const [showInsertSheet, setShowInsertSheet] = useState(false);
   const [videoInsertActive, setVideoInsertActive] = useState(false);
@@ -1071,6 +1072,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       setAdClips(settings.adClips || []);
       setReplayEnabled(settings.replayEnabled);
       setReplaySeconds(settings.replaySeconds);
+      setScoreboardLayout(settings.scoreboardLayout);
     });
   }, []);
 
@@ -1079,6 +1081,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     loadStreamSettings().then(async (settings) => {
       setReplayEnabled(settings.replayEnabled);
       setReplaySeconds(settings.replaySeconds);
+      setScoreboardLayout(settings.scoreboardLayout);
       streamQualitySettingRef.current = settings.streamQuality;
       const resolved = await resolveEncoderQuality(settings.streamQuality);
       setEncoderQuality(isFreeTier ? 'low' : resolved);
@@ -1718,6 +1721,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                 pointerEvents="none"
                 camera="back"
                 streamQuality={isFreeTier ? 'low' : encoderQuality}
+                scoreboardLayout={scoreboardLayout}
                 onConnectionSuccess={handleStreamConnected}
                 onConnectionFailed={(e: { nativeEvent?: { code?: string }; code?: string }) => {
                   const code = e?.nativeEvent?.code ?? e?.code ?? 'unknown';

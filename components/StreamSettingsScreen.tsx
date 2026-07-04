@@ -18,11 +18,14 @@ import {
   DEFAULT_STREAM_SETTINGS,
   PLATFORM_LABELS,
   REPLAY_SECONDS_OPTIONS,
+  SCOREBOARD_LAYOUT_HINTS,
+  SCOREBOARD_LAYOUT_LABELS,
   STUB_PLATFORMS,
   STREAM_QUALITY_HINTS,
   STREAM_QUALITY_LABELS,
   StreamPlatform,
   StreamQuality,
+  ScoreboardLayout,
   StreamSettings,
   VkStreamTarget,
   type AdClipPreset,
@@ -384,6 +387,25 @@ export function StreamSettingsScreen({ onClose }: Props) {
           })}
         </View>
         <Text style={styles.hint}>{STREAM_QUALITY_HINTS[settings.streamQuality]}</Text>
+
+        <Text style={styles.sectionTitle}>Табло в эфире</Text>
+        <View style={styles.platformRow}>
+          {(['full', 'center', 'left', 'right'] as ScoreboardLayout[]).map((layout) => {
+            const active = settings.scoreboardLayout === layout;
+            return (
+              <TouchableOpacity
+                key={layout}
+                style={[styles.platformChip, active && styles.platformChipActive]}
+                onPress={() => setSettings((prev) => ({ ...prev, scoreboardLayout: layout }))}
+              >
+                <Text style={[styles.platformChipText, active && styles.platformChipTextActive]}>
+                  {SCOREBOARD_LAYOUT_LABELS[layout]}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <Text style={styles.hint}>{SCOREBOARD_LAYOUT_HINTS[settings.scoreboardLayout]}</Text>
 
         <Text style={styles.sectionTitle}>Повтор в эфире</Text>
         <View style={styles.block}>

@@ -22,11 +22,14 @@ export type EventBannerPayload = {
 
 export type ResolvedStreamQuality = 'high' | 'medium' | 'low';
 
+export type ScoreboardLayout = 'full' | 'center' | 'left' | 'right';
+
 export type VideoInsertKind = 'ad' | 'replay';
 
 export type WaafLivestreamViewProps = ViewProps & {
   camera?: 'front' | 'back';
   streamQuality?: ResolvedStreamQuality;
+  scoreboardLayout?: ScoreboardLayout;
   onConnectionSuccess?: () => void;
   onConnectionFailed?: (event: { nativeEvent: { code: string } }) => void;
   onDisconnect?: () => void;

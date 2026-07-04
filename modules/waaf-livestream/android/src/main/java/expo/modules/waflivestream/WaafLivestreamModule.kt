@@ -27,6 +27,10 @@ class WaafLivestreamModule : Module() {
         view.setStreamQuality(quality)
       }
 
+      Prop("scoreboardLayout") { view: WaafLivestreamView, layout: String ->
+        view.setScoreboardLayout(layout)
+      }
+
       AsyncFunction("startStreaming") { view: WaafLivestreamView, streamKey: String, rtmpUrl: String, muted: Boolean?, quality: String?, captureReplay: Boolean? ->
         view.startStreaming(rtmpUrl, streamKey, muted ?: false, quality, captureReplay ?: false)
       }

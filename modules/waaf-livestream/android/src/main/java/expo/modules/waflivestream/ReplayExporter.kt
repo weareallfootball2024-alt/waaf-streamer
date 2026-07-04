@@ -1,10 +1,8 @@
 package expo.modules.waflivestream
 
 import android.media.MediaCodec
-import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.util.Log
-import com.pedro.rtsp.utils.RtpConstants
 import java.io.File
 
 internal object ReplayExporter {
@@ -15,27 +13,13 @@ internal object ReplayExporter {
     seconds: Int,
     outputPath: String,
   ): Boolean {
+    val clip = ReplayClipBuilder.build(snapshot, seconds) ?: return false
     val videoFormat = snapshot.videoFormat ?: return false
-    val video = snapshot.videoFrames
-    if (video.isEmpty()) return false
+    val clipVideo = clip.videoFrames
+    if (clipVideo.isEmpty()) return false
 
-    val durationUs = seconds.coerceIn(1, 15) * 1_000_000L
-    val endPts = video.last().presentationTimeUs
-    val startTarget = endPts - durationUs
-
-    var startIdx = video.indexOfLast {
-      it.presentationTimeUs <= startTarget && isKeyFrame(it)
-    }
-    if (startIdx < 0) {
-      startIdx = video.indexOfFirst { isKeyFrame(it) }
-    }
-    if (startIdx < 0) return false
-
-    val clipVideo = video.subList(startIdx, video.size)
     val firstPts = clipVideo.first().presentationTimeUs
-    val clipAudio = snapshot.audioFrames.filter {
-      it.presentationTimeUs in firstPts..endPts
-    }
+    val clipAudio = clip.audioFrames
 
     val parent = File(outputPath).parentFile
     if (parent != null && !parent.exists()) parent.mkdirs()
@@ -85,12 +69,5 @@ internal object ReplayExporter {
       set(0, frame.data.size, frame.presentationTimeUs - basePts, frame.flags)
     }
     muxer.writeSampleData(track, java.nio.ByteBuffer.wrap(frame.data), info)
-  }
-
-  private fun isKeyFrame(frame: EncodedFrame): Boolean {
-    if (frame.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0) return true
-    if (frame.data.size < 5) return false
-    val nalType = frame.data[4].toInt() and 0x1F
-    return nalType == RtpConstants.IDR
   }
 }

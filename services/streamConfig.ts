@@ -2,6 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 
 import {
   DEFAULT_STREAM_SETTINGS,
+  ScoreboardLayout,
   StreamPlatform,
   StreamQuality,
   StreamSettings,
@@ -9,12 +10,20 @@ import {
 } from '../constants/streamPlatforms';
 
 const VALID_QUALITIES: StreamQuality[] = ['high', 'medium', 'low', 'auto'];
+const VALID_SCOREBOARD_LAYOUTS: ScoreboardLayout[] = ['full', 'center', 'left', 'right'];
 
 function normalizeStreamQuality(value: unknown): StreamQuality {
   if (typeof value === 'string' && VALID_QUALITIES.includes(value as StreamQuality)) {
     return value as StreamQuality;
   }
   return DEFAULT_STREAM_SETTINGS.streamQuality;
+}
+
+function normalizeScoreboardLayout(value: unknown): ScoreboardLayout {
+  if (typeof value === 'string' && VALID_SCOREBOARD_LAYOUTS.includes(value as ScoreboardLayout)) {
+    return value as ScoreboardLayout;
+  }
+  return DEFAULT_STREAM_SETTINGS.scoreboardLayout;
 }
 import { getPlaylistSessionRtmp, hydratePlaylistSessionRtmp } from './vkPlaylistSession';
 
@@ -44,6 +53,7 @@ export async function loadStreamSettings(): Promise<StreamSettings> {
       ...DEFAULT_STREAM_SETTINGS,
       ...parsed,
       streamQuality: normalizeStreamQuality(parsed.streamQuality),
+      scoreboardLayout: normalizeScoreboardLayout(parsed.scoreboardLayout),
       replayEnabled: parsed.replayEnabled !== false,
       replaySeconds: normalizeReplaySeconds(parsed.replaySeconds),
       adClips: Array.isArray(parsed.adClips) ? parsed.adClips.slice(0, 3) : [],
