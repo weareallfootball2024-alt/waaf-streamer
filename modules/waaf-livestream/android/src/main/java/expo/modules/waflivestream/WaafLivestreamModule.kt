@@ -66,8 +66,8 @@ class WaafLivestreamModule : Module() {
         view.stopVideoInsert()
       }
 
-      AsyncFunction("triggerReplay") { view: WaafLivestreamView, seconds: Int? ->
-        view.triggerReplay(seconds ?: 10)
+      AsyncFunction("triggerReplay") { view: WaafLivestreamView, seconds: Int?, teamSide: String? ->
+        view.triggerReplay(seconds ?: 10, teamSide)
       }
     }
   }

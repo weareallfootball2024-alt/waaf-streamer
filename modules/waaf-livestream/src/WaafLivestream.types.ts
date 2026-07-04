@@ -58,5 +58,5 @@ export type WaafLivestreamViewRef = {
   showEventBanner: (payload: EventBannerPayload) => Promise<void>;
   playVideoInsert: (filePath: string, loop?: boolean) => Promise<void>;
   stopVideoInsert: () => Promise<void>;
-  triggerReplay: (seconds?: number) => Promise<void>;
+  triggerReplay: (seconds?: number, teamSide?: 'home' | 'away') => Promise<void>;
 };

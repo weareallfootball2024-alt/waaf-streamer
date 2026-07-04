@@ -1,5 +1,7 @@
 export type VkStreamTarget = 'wall' | 'playlist';
 
+export type VkStreamSource = 'api' | 'manual';
+
 export type StreamPlatform = 'vk' | 'youtube' | 'rutube' | 'waaf';
 
 export type StreamQuality = 'high' | 'medium' | 'low' | 'auto';
@@ -43,11 +45,13 @@ export type PlatformConfig = {
 
 export type VkPlatformConfig = PlatformConfig & {
   streamTarget: VkStreamTarget;
+  streamSource: VkStreamSource;
   communityId?: number;
   communityName?: string;
   communityPhoto?: string;
   albumId?: number;
   albumTitle?: string;
+  liveVideoId?: number;
 };
 
 export type AdClipPreset = {
@@ -97,6 +101,7 @@ export const DEFAULT_STREAM_SETTINGS: StreamSettings = {
   vk: {
     ...emptyPlatform(true),
     streamTarget: 'wall',
+    streamSource: 'api',
     communityId: undefined,
     communityName: undefined,
   },

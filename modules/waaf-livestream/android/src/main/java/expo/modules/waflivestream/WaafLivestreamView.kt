@@ -39,7 +39,37 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   private var scoreboardFilter: ImageObjectFilterRender? = null
   private var eventFilter: ImageObjectFilterRender? = null
   private var eventFilterAdded = false
+  private var replayIntroFilter: ImageObjectFilterRender? = null
+  private var replayIntroFilterAdded = false
+  private var replayIntroTicks = 0
+  private var replayIntroTeamSide: String? = null
+  private var replayIntroOnComplete: (() -> Unit)? = null
   private val clearEventRunnable = Runnable { hideEventBanner() }
+  private val replayIntroBlinkRunnable = object : Runnable {
+    override fun run() {
+      val filter = replayIntroFilter ?: return
+      val dimmed = replayIntroTicks % 2 == 1
+      val logo = when (replayIntroTeamSide) {
+        "away" -> logoAwayBitmap
+        "home" -> logoHomeBitmap
+        else -> null
+      }
+      val teamName = when (replayIntroTeamSide) {
+        "away" -> teamAway
+        "home" -> teamHome
+        else -> null
+      }
+      filter.setImage(ReplayIntroRenderer.render("ПОВТОР", logo, teamName, dimmed))
+      replayIntroTicks++
+      if (replayIntroTicks < 6) {
+        mainHandler.postDelayed(this, 350)
+      } else {
+        hideReplayIntro()
+        replayIntroOnComplete?.invoke()
+        replayIntroOnComplete = null
+      }
+    }
+  }
   private var isPrepared = false
   private var isMuted = false
   private var scoreboardReady = false
@@ -268,6 +298,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
 
   private fun hideGlFiltersForInsert() {
     hideEventBanner()
+    hideReplayIntro()
     try {
       genericStream.getGlInterface().clearFilters()
     } catch (_: Exception) {
@@ -284,7 +315,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     videoInjector.stop()
   }
 
-  fun triggerReplay(seconds: Int) {
+  fun triggerReplay(seconds: Int, teamSide: String? = null) {
     if (!genericStream.isStreaming) {
       post { onVideoInsertError(mapOf("code" to "not_streaming")) }
       return
@@ -295,7 +326,69 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     }
 
     val clipSeconds = seconds.coerceIn(1, 15)
-    replayDirectPlayer.play(replayRingBuffer.snapshot(), clipSeconds)
+    val snapshot = replayRingBuffer.snapshot()
+    mainHandler.post {
+      showReplayIntro(teamSide) {
+        replayDirectPlayer.play(snapshot, clipSeconds)
+      }
+    }
+  }
+
+  private fun showReplayIntro(teamSide: String?, onComplete: () -> Unit) {
+    hideReplayIntro()
+    replayIntroTeamSide = teamSide
+    replayIntroOnComplete = onComplete
+    replayIntroTicks = 0
+
+    val filter = ImageObjectFilterRender().also { replayIntroFilter = it }
+    val streamW = encoderQuality.width
+    val streamH = encoderQuality.height
+    val introW = 1280f
+    val introH = 720f
+    val scaleX = introW * 100f / streamW
+    val scaleY = introH * 100f / streamH
+    filter.setScale(scaleX, scaleY)
+    filter.setPosition(50f - scaleX / 2f, 50f - scaleY / 2f)
+
+    val logo = when (teamSide) {
+      "away" -> logoAwayBitmap
+      "home" -> logoHomeBitmap
+      else -> null
+    }
+    val teamName = when (teamSide) {
+      "away" -> teamAway
+      "home" -> teamHome
+      else -> null
+    }
+    filter.setImage(ReplayIntroRenderer.render("ПОВТОР", logo, teamName, false))
+
+    try {
+      genericStream.getGlInterface().addFilter(filter)
+      replayIntroFilterAdded = true
+    } catch (e: Exception) {
+      Log.w(TAG, "replay intro filter failed", e)
+      replayIntroOnComplete = null
+      onComplete()
+      return
+    }
+
+    Log.i(TAG, "replay intro team=$teamSide")
+    mainHandler.post(replayIntroBlinkRunnable)
+  }
+
+  private fun hideReplayIntro() {
+    mainHandler.removeCallbacks(replayIntroBlinkRunnable)
+    replayIntroFilter?.let { filter ->
+      if (replayIntroFilterAdded) {
+        try {
+          genericStream.getGlInterface().removeFilter(filter)
+        } catch (_: Exception) {
+        }
+        replayIntroFilterAdded = false
+      }
+    }
+    replayIntroFilter = null
+    replayIntroTeamSide = null
   }
 
   private fun videoRotation(): Int = 0
@@ -551,6 +644,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     scoreboardReady = false
     replayRingBuffer.clear()
     hideEventBanner()
+    hideReplayIntro()
     if (genericStream.isStreaming) {
       genericStream.stopStream()
     }

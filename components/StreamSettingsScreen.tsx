@@ -632,7 +632,32 @@ export function StreamSettingsScreen({ onClose }: Props) {
 
             {hasCommunity && (
               <>
-                <Text style={[styles.blockTitle, { marginTop: 16 }]}>Куда в сообществе</Text>
+                <Text style={[styles.blockTitle, { marginTop: 16 }]}>Способ запуска</Text>
+                <View style={styles.platformRow}>
+                  <TouchableOpacity
+                    style={[styles.platformChip, vk.streamSource !== 'manual' && styles.platformChipActive]}
+                    onPress={() => updatePlatform('vk', { streamSource: 'api' })}
+                  >
+                    <Text style={[styles.platformChipText, vk.streamSource !== 'manual' && styles.platformChipTextActive]}>
+                      Авто VK (на стену)
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.platformChip, vk.streamSource === 'manual' && styles.platformChipActive]}
+                    onPress={() => updatePlatform('vk', { streamSource: 'manual' })}
+                  >
+                    <Text style={[styles.platformChipText, vk.streamSource === 'manual' && styles.platformChipTextActive]}>
+                      Вручную (Studio)
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={[styles.hint, { marginBottom: 8 }]}>
+                  {vk.streamSource === 'api'
+                    ? 'Приложение создаёт трансляцию через VK API, публикует на стену и завершает её по СТОП. Нужен scope video (перелогиньтесь через VK после обновления).'
+                    : 'Ключи из VK Studio. СТОП отключает RTMP — в Studio может понадобиться «Завершить трансляцию» вручную.'}
+                </Text>
+
+                <Text style={[styles.blockTitle, { marginTop: 8 }]}>Куда в сообществе</Text>
                 <View style={styles.platformRow}>
                   <TouchableOpacity
                     style={[styles.platformChip, vk.streamTarget === 'wall' && styles.platformChipActive]}
@@ -656,7 +681,7 @@ export function StreamSettingsScreen({ onClose }: Props) {
                   Счёт и таймер вшиваются в видео на телефоне и уходят в VK вместе с эфиром.
                 </Text>
 
-                {vk.streamTarget === 'wall' && (
+                {vk.streamTarget === 'wall' && vk.streamSource === 'manual' && (
                   <>
                     <Text style={styles.hint}>
                       Кабинет СООБЩЕСТВА в Studio → Ключи и виджеты. Постоянный ключ не всегда создаёт пост на стене автоматически.
@@ -684,7 +709,7 @@ export function StreamSettingsScreen({ onClose }: Props) {
                   </>
                 )}
 
-                {vk.streamTarget === 'playlist' && (
+                {vk.streamTarget === 'playlist' && vk.streamSource === 'manual' && (
                   <>
                     <Text style={styles.hint}>
                       Создайте или выберите трансляцию в VK Studio, скопируйте её RTMP — ключ новый для каждого эфира.
@@ -727,6 +752,22 @@ export function StreamSettingsScreen({ onClose }: Props) {
                     <TouchableOpacity style={styles.btnApply} onPress={applyPlaylistRtmp}>
                       <Text style={styles.btnApplyText}>ПРИМЕНИТЬ ДЛЯ ЭФИРА</Text>
                     </TouchableOpacity>
+                  </>
+                )}
+
+                {vk.streamSource === 'manual' && (
+                  <>
+                    <Text style={[styles.hint, { marginTop: 12 }]}>
+                      Ссылка на трансляцию (video-123_456) — для авто-завершения в Studio при СТОП:
+                    </Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="https://vk.com/video-123_456"
+                      placeholderTextColor="#666"
+                      value={vk.embedUrl}
+                      onChangeText={(t) => updatePlatform('vk', { embedUrl: t })}
+                      autoCapitalize="none"
+                    />
                   </>
                 )}
               </>
