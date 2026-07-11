@@ -13,6 +13,7 @@ import androidx.annotation.RequiresApi
 import com.pedro.common.ConnectChecker
 import com.pedro.encoder.input.gl.render.filters.`object`.ImageObjectFilterRender
 import com.pedro.encoder.input.sources.audio.MicrophoneSource
+import com.pedro.encoder.input.sources.audio.SilenceAudioSource
 import com.pedro.encoder.input.sources.video.Camera2Source
 import com.pedro.encoder.utils.gl.AspectRatioMode
 import com.pedro.encoder.utils.gl.TranslateTo
@@ -222,6 +223,23 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
         override fun isMicMuted(): Boolean = isMuted
 
         override fun setMicMuted(muted: Boolean) = setMicrophoneMuted(muted)
+
+        override fun beginReplayAudioIsolation() {
+          try {
+            genericStream.changeAudioSource(SilenceAudioSource())
+          } catch (e: Exception) {
+            Log.w(TAG, "replay silence audio failed", e)
+          }
+        }
+
+        override fun endReplayAudioIsolation() {
+          try {
+            genericStream.changeAudioSource(microphoneSource)
+            setMicrophoneMuted(isMuted)
+          } catch (e: Exception) {
+            Log.w(TAG, "replay restore mic failed", e)
+          }
+        }
 
         override fun scheduleScoreboardRestore() {
           scoreboardReady = false
@@ -599,6 +617,27 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   fun setCameraFacing(camera: String) {
     if (camera == "front") {
       (genericStream.videoSource as? Camera2Source)?.switchCamera()
+    }
+  }
+
+  fun zoomIn(step: Float = 0.15f) {
+    adjustZoom(step)
+  }
+
+  fun zoomOut(step: Float = 0.15f) {
+    adjustZoom(-step)
+  }
+
+  private fun adjustZoom(delta: Float) {
+    val camera = genericStream.videoSource as? Camera2Source ?: return
+    if (!camera.isRunning()) return
+    try {
+      val range = camera.getZoomRange()
+      val next = (camera.getZoom() + delta).coerceIn(range.lower, range.upper)
+      camera.setZoom(next)
+      Log.d(TAG, "camera zoom=$next range=${range.lower}..${range.upper}")
+    } catch (e: Exception) {
+      Log.w(TAG, "zoom adjust failed", e)
     }
   }
 

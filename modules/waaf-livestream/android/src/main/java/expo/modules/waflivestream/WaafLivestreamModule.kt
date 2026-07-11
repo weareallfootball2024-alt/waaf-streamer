@@ -69,6 +69,14 @@ class WaafLivestreamModule : Module() {
       AsyncFunction("triggerReplay") { view: WaafLivestreamView, seconds: Int?, teamSide: String? ->
         view.triggerReplay(seconds ?: 10, teamSide)
       }
+
+      AsyncFunction("zoomIn") { view: WaafLivestreamView ->
+        view.zoomIn()
+      }
+
+      AsyncFunction("zoomOut") { view: WaafLivestreamView ->
+        view.zoomOut()
+      }
     }
   }
 }

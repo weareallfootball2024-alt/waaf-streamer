@@ -59,4 +59,6 @@ export type WaafLivestreamViewRef = {
   playVideoInsert: (filePath: string, loop?: boolean) => Promise<void>;
   stopVideoInsert: () => Promise<void>;
   triggerReplay: (seconds?: number, teamSide?: 'home' | 'away') => Promise<void>;
+  zoomIn: () => Promise<void>;
+  zoomOut: () => Promise<void>;
 };

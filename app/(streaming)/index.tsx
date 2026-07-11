@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 
 import { WaafLivestreamView, type WaafLivestreamViewRef } from 'waaf-livestream';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -1128,6 +1129,15 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     });
   }, [settingsOpen, isFreeTier]);
 
+  useEffect(() => {
+    if (!isStreaming) {
+      deactivateKeepAwake('waaf-stream');
+      return;
+    }
+    void activateKeepAwakeAsync('waaf-stream');
+    return () => deactivateKeepAwake('waaf-stream');
+  }, [isStreaming]);
+
   const pushScoreboardToNative = () => {
     if (!canStream || !permissionGranted || !videoRef.current) return;
     const teams = resolveMatchTeamNames(match);
@@ -1544,6 +1554,14 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
 
   const handleStopVideoInsert = () => {
     videoRef.current?.stopVideoInsert().catch(() => {});
+  };
+
+  const handleZoomIn = () => {
+    videoRef.current?.zoomIn().catch(() => {});
+  };
+
+  const handleZoomOut = () => {
+    videoRef.current?.zoomOut().catch(() => {});
   };
 
   const handleTriggerReplay = async (teamSide?: 'home' | 'away') => {
@@ -2161,6 +2179,24 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                     )}
                     {canStream && (
                     <>
+                    {isStreaming && (
+                      <>
+                        <TouchableOpacity
+                          style={[styles.btnZoom, (videoInsertActive || replayLoading) && { opacity: 0.45 }]}
+                          onPress={handleZoomOut}
+                          disabled={videoInsertActive || replayLoading}
+                        >
+                          <Text style={styles.btnZoomText}>−</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.btnZoom, (videoInsertActive || replayLoading) && { opacity: 0.45 }]}
+                          onPress={handleZoomIn}
+                          disabled={videoInsertActive || replayLoading}
+                        >
+                          <Text style={styles.btnZoomText}>+</Text>
+                        </TouchableOpacity>
+                      </>
+                    )}
                     <TouchableOpacity style={[styles.btnMic, isMuted && styles.btnMicOff]} onPress={toggleMic}>
                         <Text style={styles.btnMicText}>{isMuted ? "🔇" : "🎙️"}</Text>
                     </TouchableOpacity>
@@ -2372,6 +2408,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#ccc',
+  },
+  btnZoom: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ccc',
+  },
+  btnZoomText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 22,
+    lineHeight: 24,
   },
   btnMicSettings: {
     width: 44,
