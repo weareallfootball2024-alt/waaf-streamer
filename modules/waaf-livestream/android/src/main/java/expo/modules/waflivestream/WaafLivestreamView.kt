@@ -41,32 +41,46 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   private var eventFilterAdded = false
   private var replayIntroFilter: ImageObjectFilterRender? = null
   private var replayIntroFilterAdded = false
+  private var replayIntroPhase = 0
   private var replayIntroTicks = 0
   private var replayIntroTeamSide: String? = null
   private var replayIntroOnComplete: (() -> Unit)? = null
   private val clearEventRunnable = Runnable { hideEventBanner() }
-  private val replayIntroBlinkRunnable = object : Runnable {
+  private val replayIntroAnimRunnable = object : Runnable {
     override fun run() {
       val filter = replayIntroFilter ?: return
-      val dimmed = replayIntroTicks % 2 == 1
-      val logo = when (replayIntroTeamSide) {
-        "away" -> logoAwayBitmap
-        "home" -> logoHomeBitmap
-        else -> null
-      }
-      val teamName = when (replayIntroTeamSide) {
-        "away" -> teamAway
-        "home" -> teamHome
-        else -> null
-      }
-      filter.setImage(ReplayIntroRenderer.render("ПОВТОР", logo, teamName, dimmed))
-      replayIntroTicks++
-      if (replayIntroTicks < 6) {
-        mainHandler.postDelayed(this, 350)
-      } else {
-        hideReplayIntro()
-        replayIntroOnComplete?.invoke()
-        replayIntroOnComplete = null
+      val logo = replayIntroLogo()
+      val teamName = replayIntroTeamName()
+      val hasLogo = logo != null
+
+      when (replayIntroPhase) {
+        0 -> {
+          val dimmed = replayIntroTicks % 2 == 1
+          filter.setImage(ReplayIntroRenderer.render(logo, teamName, dimmed, 1f))
+          replayIntroTicks++
+          val pulseTicks = if (hasLogo) 3 else 2
+          val pulseDelay = if (hasLogo) 350L else 300L
+          if (replayIntroTicks < pulseTicks) {
+            mainHandler.postDelayed(this, pulseDelay)
+          } else if (hasLogo) {
+            replayIntroPhase = 1
+            replayIntroTicks = 0
+            mainHandler.postDelayed(this, 50L)
+          } else {
+            finishReplayIntro()
+          }
+        }
+        1 -> {
+          val fadeSteps = 10
+          val alpha = 1f - replayIntroTicks.toFloat() / fadeSteps
+          filter.setImage(ReplayIntroRenderer.render(logo, teamName, false, alpha))
+          replayIntroTicks++
+          if (replayIntroTicks < fadeSteps) {
+            mainHandler.postDelayed(this, 50L)
+          } else {
+            finishReplayIntro()
+          }
+        }
       }
     }
   }
@@ -338,6 +352,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     hideReplayIntro()
     replayIntroTeamSide = teamSide
     replayIntroOnComplete = onComplete
+    replayIntroPhase = 0
     replayIntroTicks = 0
 
     val filter = ImageObjectFilterRender().also { replayIntroFilter = it }
@@ -350,17 +365,14 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     filter.setScale(scaleX, scaleY)
     filter.setPosition(50f - scaleX / 2f, 50f - scaleY / 2f)
 
-    val logo = when (teamSide) {
-      "away" -> logoAwayBitmap
-      "home" -> logoHomeBitmap
-      else -> null
-    }
-    val teamName = when (teamSide) {
-      "away" -> teamAway
-      "home" -> teamHome
-      else -> null
-    }
-    filter.setImage(ReplayIntroRenderer.render("ПОВТОР", logo, teamName, false))
+    filter.setImage(
+      ReplayIntroRenderer.render(
+        replayIntroLogo(),
+        replayIntroTeamName(),
+        dimmed = false,
+        logoAlpha = 1f,
+      ),
+    )
 
     try {
       genericStream.getGlInterface().addFilter(filter)
@@ -373,11 +385,29 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     }
 
     Log.i(TAG, "replay intro team=$teamSide")
-    mainHandler.post(replayIntroBlinkRunnable)
+    mainHandler.post(replayIntroAnimRunnable)
+  }
+
+  private fun replayIntroLogo(): Bitmap? = when (replayIntroTeamSide) {
+    "away" -> logoAwayBitmap
+    "home" -> logoHomeBitmap
+    else -> null
+  }
+
+  private fun replayIntroTeamName(): String? = when (replayIntroTeamSide) {
+    "away" -> teamAway
+    "home" -> teamHome
+    else -> null
+  }
+
+  private fun finishReplayIntro() {
+    hideReplayIntro()
+    replayIntroOnComplete?.invoke()
+    replayIntroOnComplete = null
   }
 
   private fun hideReplayIntro() {
-    mainHandler.removeCallbacks(replayIntroBlinkRunnable)
+    mainHandler.removeCallbacks(replayIntroAnimRunnable)
     replayIntroFilter?.let { filter ->
       if (replayIntroFilterAdded) {
         try {

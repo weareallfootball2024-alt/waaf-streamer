@@ -1546,7 +1546,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     videoRef.current?.stopVideoInsert().catch(() => {});
   };
 
-  const handleTriggerReplay = async () => {
+  const handleTriggerReplay = async (teamSide?: 'home' | 'away') => {
     if (!replayEnabled || isFreeTier) return;
     if (!isStreaming) {
       Alert.alert('Повтор', 'Сначала запустите эфир — буфер повтора заполняется во время трансляции.');
@@ -1555,11 +1555,34 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     if (replayLoading || videoInsertActive) return;
     setReplayLoading(true);
     try {
-      await videoRef.current?.triggerReplay(replaySeconds, undefined);
+      await videoRef.current?.triggerReplay(replaySeconds, teamSide);
     } catch {
       setReplayLoading(false);
       Alert.alert('Повтор', `Не удалось вставить последние ${replaySeconds} сек.`);
     }
+  };
+
+  const resolveReplayTeamSide = (
+    side: 'home' | 'away',
+    eventType: string,
+  ): 'home' | 'away' => {
+    if (eventType === 'own_goal') {
+      return side === 'home' ? 'away' : 'home';
+    }
+    return side;
+  };
+
+  const offerGoalReplay = (side: 'home' | 'away', eventType: string) => {
+    if (!replayEnabled || isFreeTier || !isStreaming || replayLoading || videoInsertActive) return;
+    const teamSide = resolveReplayTeamSide(side, eventType);
+    Alert.alert(
+      'Повтор',
+      `Показать повтор последних ${replaySeconds} сек.?`,
+      [
+        { text: 'Нет', style: 'cancel' },
+        { text: 'Да', onPress: () => { void handleTriggerReplay(teamSide); } },
+      ],
+    );
   };
 
   const handleTimerAction = (action: string) => {
@@ -1862,7 +1885,10 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       }
 
       if (['goal', 'penalty', 'own_goal'].includes(selectedEventType)) { 
-          sendUpdate(updates, selectedEventType, player.id, teamId, isHighlight, assistantId); 
+          sendUpdate(updates, selectedEventType, player.id, teamId, isHighlight, assistantId);
+          if (activeSide === 'home' || activeSide === 'away') {
+            offerGoalReplay(activeSide, selectedEventType);
+          }
       } else { 
           sendUpdate({}, selectedEventType, player.id, teamId, isHighlight, assistantId); 
           if (selectedEventType === 'second_yellow_card') Alert.alert("Удаление"); 
@@ -2125,7 +2151,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                         styles.btnReplay,
                         (!isStreaming || videoInsertActive || replayLoading) && { opacity: 0.45 },
                       ]}
-                      onPress={handleTriggerReplay}
+                      onPress={() => { void handleTriggerReplay(); }}
                       disabled={videoInsertActive || replayLoading}
                     >
                         <Text style={styles.btnInsertText}>
