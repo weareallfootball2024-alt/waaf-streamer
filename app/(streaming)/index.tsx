@@ -48,7 +48,7 @@ import {
 } from '../../services/streamQuality';
 import { checkStreamReadiness } from '../../services/streamReadiness';
 import { canOpenStreamSettings } from '../../services/streamSettingsAccess';
-import { stopVkLiveBroadcast, startVkLiveBroadcast, parseVkVideoRef, vkStreamErrorMessage, resolveActiveVkLiveWithRetry, getStoredVkToken } from '../../services/vkAuth';
+import { stopVkLiveBroadcast, startVkLiveBroadcast, parseVkVideoRef, vkStopBroadcastMessage, vkStreamErrorMessage, resolveActiveVkLiveWithRetry, getStoredVkToken } from '../../services/vkAuth';
 import { saveVkLiveSession, loadVkLiveSession, clearVkLiveSession } from '../../services/vkLiveSession';
 import {
   getStreamPermissionState,
@@ -1220,25 +1220,15 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
         embedUrl: session?.embedUrl ?? settings.vk.embedUrl,
       });
       await clearVkLiveSession();
-      if (result.ok) {
-        return { ok: true, message: 'Трансляция в VK Studio завершена.' };
-      }
-      if (result.error === 'no_vk_token') {
-        return {
-          ok: false,
-          message:
-            'RTMP отключён. В VK Studio нажмите «Завершить трансляцию» вручную — для авто-завершения войдите через VK.',
-        };
-      }
       return {
-        ok: false,
-        message: `RTMP отключён. ${vkStreamErrorMessage(result.error)}`,
+        ok: result.ok,
+        message: vkStopBroadcastMessage({ ok: result.ok, error: result.error }),
       };
     } catch (e) {
       console.warn('[vk] stop broadcast failed', e);
       return {
         ok: false,
-        message: 'RTMP отключён. Завершите трансляцию в VK Studio вручную.',
+        message: vkStopBroadcastMessage({ ok: false, error: 'network_error' }),
       };
     }
   };

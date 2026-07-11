@@ -8,7 +8,16 @@ WebBrowser.maybeCompleteAuthSession();
 
 const VK_TOKEN_KEY = 'vk_access_token';
 const VK_USER_ID_KEY = 'vk_user_id';
+const VK_CAPABILITIES_KEY = 'vk_capabilities_cache';
 const APP_OAUTH_RETURN = Linking.createURL('oauth/vk');
+
+export type VkCapabilities = {
+  groups: boolean;
+  video: boolean;
+  oauth_scope_requested?: string;
+  errors?: { groups?: string | null; video?: string | null };
+  checkedAt?: number;
+};
 
 export type VkGroup = {
   id: number;
@@ -32,6 +41,40 @@ export async function getStoredVkUserId(): Promise<string | null> {
 export async function clearVkToken(): Promise<void> {
   await SecureStore.deleteItemAsync(VK_TOKEN_KEY);
   await SecureStore.deleteItemAsync(VK_USER_ID_KEY);
+  await SecureStore.deleteItemAsync(VK_CAPABILITIES_KEY);
+}
+
+export async function getStoredVkCapabilities(): Promise<VkCapabilities | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(VK_CAPABILITIES_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as VkCapabilities;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchAndStoreVkCapabilities(groupId?: number): Promise<VkCapabilities | null> {
+  const token = await getStoredVkToken();
+  if (!token) return null;
+  try {
+    const qs = groupId ? new URLSearchParams({ group_id: String(groupId) }) : new URLSearchParams();
+    const url = `${API_URL}/api/vk/capabilities${qs.toString() ? `?${qs.toString()}` : ''}`;
+    const res = await fetch(url, { headers: { 'X-VK-Access-Token': token } });
+    const data = await res.json();
+    if (!res.ok) return null;
+    const caps: VkCapabilities = {
+      groups: !!data.groups,
+      video: !!data.video,
+      oauth_scope_requested: data.oauth_scope_requested,
+      errors: data.errors,
+      checkedAt: Date.now(),
+    };
+    await SecureStore.setItemAsync(VK_CAPABILITIES_KEY, JSON.stringify(caps));
+    return caps;
+  } catch {
+    return null;
+  }
 }
 
 function parseAuthResultUrl(url: string) {
@@ -116,6 +159,7 @@ export async function loginWithVk(): Promise<string> {
   } else {
     await fetchAndStoreVkUserId(data.access_token);
   }
+  await fetchAndStoreVkCapabilities();
   return data.access_token;
 }
 
@@ -307,7 +351,10 @@ export async function startVkLiveBroadcast(opts: {
 }
 
 export function vkStreamErrorMessage(error?: string): string {
-  switch (error) {
+  const raw = String(error || '').trim();
+  if (!raw) return 'Неизвестная ошибка VK API';
+
+  switch (raw) {
     case 'no_vk_token':
       return 'Войдите через VK в настройках трансляции.';
     case 'no_group_id':
@@ -315,8 +362,40 @@ export function vkStreamErrorMessage(error?: string): string {
     case 'network_error':
       return 'Нет связи с сервером WAAF.';
     case 'vk_no_rtmp':
-      return 'VK не выдал RTMP. Нужен scope video у приложения (devsupport@corp.vk.com).';
+      return 'VK не выдал RTMP. Нужен scope video у приложения 54534524 (devsupport@corp.vk.com).';
+    case 'vk_stop_failed':
+      return 'VK API не завершил трансляцию. Завершите в Studio вручную.';
     default:
-      return error || 'Неизвестная ошибка VK API';
+      break;
   }
+
+  const lower = raw.toLowerCase();
+  if (lower.includes('активная трансляция') && lower.includes('не найдена')) {
+    return 'Эфир идёт, но VK API не видит объект трансляции (нет scope video или эфир ещё не зарегистрирован). Подождите 30 сек или завершите в Studio вручную.';
+  }
+  if (
+    lower.includes('access denied') ||
+    lower.includes('доступ запрещён') ||
+    lower.includes('profile type') ||
+    lower.includes('scope video') ||
+    raw.includes('error_code":15') ||
+    raw.includes('error_code":204')
+  ) {
+    return 'VK не одобрил scope video для приложения 54534524. Завершите в Studio вручную. Запрос: devsupport@corp.vk.com';
+  }
+  return raw;
+}
+
+/** Сообщение для алерта после СТОП */
+export function vkStopBroadcastMessage(opts: {
+  ok: boolean;
+  error?: string;
+}): string {
+  if (opts.ok) {
+    return 'Трансляция в VK Studio завершена.';
+  }
+  if (opts.error === 'no_vk_token') {
+    return 'RTMP отключён. Для авто-завершения войдите через VK и выберите сообщество. Сейчас завершите в Studio вручную.';
+  }
+  return `RTMP отключён. ${vkStreamErrorMessage(opts.error)}`;
 }

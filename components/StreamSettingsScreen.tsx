@@ -39,12 +39,15 @@ import {
   clearVkToken,
   ensureStoredVkUserId,
   fetchAdminGroups,
+  fetchAndStoreVkCapabilities,
   fetchGroupAlbums,
+  getStoredVkCapabilities,
   getStoredVkToken,
   getStoredVkUserId,
   loginWithVk,
   resolveCommunity,
   VkAlbum,
+  VkCapabilities,
   VkGroup,
 } from '../services/vkAuth';
 import type { StaffUser } from '../utils/roles';
@@ -78,7 +81,19 @@ export function StreamSettingsScreen({ onClose }: Props) {
   const [waafPassword, setWaafPassword] = useState('');
   const [waafLoading, setWaafLoading] = useState(false);
   const [vkUserId, setVkUserId] = useState<string | null>(null);
+  const [vkCaps, setVkCaps] = useState<VkCapabilities | null>(null);
+  const [capsLoading, setCapsLoading] = useState(false);
   const [linkMode, setLinkMode] = useState(false);
+
+  const refreshVkCapabilities = async (groupId?: number) => {
+    setCapsLoading(true);
+    try {
+      const caps = await fetchAndStoreVkCapabilities(groupId);
+      setVkCaps(caps);
+    } finally {
+      setCapsLoading(false);
+    }
+  };
 
   const loadAlbums = async (groupId: number) => {
     setAlbumsLoading(true);
@@ -125,6 +140,11 @@ export function StreamSettingsScreen({ onClose }: Props) {
         }
         if (saved.vk.communityId && saved.vk.streamTarget === 'playlist') {
           await loadAlbums(saved.vk.communityId);
+        }
+        const cached = await getStoredVkCapabilities();
+        if (cached) setVkCaps(cached);
+        if (token) {
+          await refreshVkCapabilities(saved.vk.communityId);
         }
       }
       setLoading(false);
@@ -178,6 +198,7 @@ export function StreamSettingsScreen({ onClose }: Props) {
         setGroups([]);
         setGroupsError(formatGroupsError(msg));
       }
+      await refreshVkCapabilities(settings.vk.communityId);
     } catch (e: unknown) {
       Alert.alert('VK', e instanceof Error ? e.message : 'Ошибка входа');
     } finally {
@@ -264,6 +285,7 @@ export function StreamSettingsScreen({ onClose }: Props) {
     if (settings.vk.streamTarget === 'playlist') {
       loadAlbums(group.id);
     }
+    void refreshVkCapabilities(group.id);
   };
 
   const handleApplyCommunity = async () => {
@@ -573,6 +595,34 @@ export function StreamSettingsScreen({ onClose }: Props) {
                     <Text style={styles.linkOut}>Выйти</Text>
                   </TouchableOpacity>
                 </View>
+                {vkLoggedIn && (
+                  <View style={styles.scopeBox}>
+                    <Text style={styles.scopeTitle}>Статус VK API (app 54534524)</Text>
+                    {capsLoading ? (
+                      <ActivityIndicator color="#888" style={{ marginVertical: 6 }} />
+                    ) : (
+                      <>
+                        <Text style={[styles.scopeLine, vkCaps?.groups ? styles.scopeOk : styles.scopePending]}>
+                          {vkCaps?.groups ? '✓' : '○'} Сообщества (groups) —{' '}
+                          {vkCaps?.groups ? 'работает' : 'ожидаем одобрение VK'}
+                        </Text>
+                        <Text style={[styles.scopeLine, vkCaps?.video ? styles.scopeOk : styles.scopePending]}>
+                          {vkCaps?.video ? '✓' : '○'} Завершение эфира (video) —{' '}
+                          {vkCaps?.video ? 'работает' : 'ожидаем одобрение VK'}
+                        </Text>
+                        {!vkCaps?.video && (
+                          <Text style={styles.scopeHint}>
+                            Пока scope video не одобрен, СТОП только отключает RTMP. Завершите трансляцию в VK Studio
+                            вручную. Запрос отправлен в devsupport@corp.vk.com — после одобрения перелогиньтесь через VK.
+                          </Text>
+                        )}
+                      </>
+                    )}
+                    <TouchableOpacity onPress={() => refreshVkCapabilities(vk.communityId)} disabled={capsLoading}>
+                      <Text style={styles.linkOut}>Обновить проверку</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
                 {groupsError && <Text style={styles.errorText}>{groupsError}</Text>}
                 {groups.length === 0 && !groupsError && (
                   <Text style={styles.empty}>Нет сообществ с правами администратора</Text>
@@ -885,6 +935,19 @@ const styles = StyleSheet.create({
   groupPhoto: { width: 36, height: 36, borderRadius: 18, marginRight: 10 },
   groupPhotoPlaceholder: { width: 36, height: 36, borderRadius: 18, marginRight: 10, backgroundColor: '#444' },
   groupName: { color: '#fff', fontSize: 14, flex: 1 },
+  scopeBox: {
+    backgroundColor: '#1e1e1e',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  scopeTitle: { color: '#aaa', fontSize: 12, fontWeight: '700', marginBottom: 8 },
+  scopeLine: { fontSize: 13, marginBottom: 4 },
+  scopeOk: { color: '#4ade80' },
+  scopePending: { color: '#fbbf24' },
+  scopeHint: { color: '#888', fontSize: 11, lineHeight: 16, marginTop: 6, marginBottom: 4 },
   adClipRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   adClipRemove: { padding: 8 },
 });
