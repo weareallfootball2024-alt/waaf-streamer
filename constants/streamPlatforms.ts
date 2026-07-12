@@ -64,6 +64,8 @@ export type StreamSettings = {
   activePlatform: StreamPlatform;
   streamQuality: StreamQuality;
   scoreboardLayout: ScoreboardLayout;
+  scoreboardOpacity: number;
+  operatorUiOpacity: number;
   replayEnabled: boolean;
   replaySeconds: number;
   adClips: AdClipPreset[];
@@ -91,10 +93,14 @@ const emptyPlatform = (enabled: boolean): PlatformConfig => ({
 
 export const REPLAY_SECONDS_OPTIONS = [5, 10, 15] as const;
 
+export const OPACITY_PERCENT_OPTIONS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100] as const;
+
 export const DEFAULT_STREAM_SETTINGS: StreamSettings = {
   activePlatform: 'vk',
   streamQuality: 'auto',
   scoreboardLayout: 'center',
+  scoreboardOpacity: 1,
+  operatorUiOpacity: 0.7,
   replayEnabled: true,
   replaySeconds: 10,
   adClips: [],

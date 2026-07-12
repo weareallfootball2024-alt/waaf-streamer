@@ -9,6 +9,7 @@ export type ScoreboardPayload = {
   period?: string;
   logoHome?: string | null;
   logoAway?: string | null;
+  opacity?: number;
 };
 
 export type EventBannerPayload = {

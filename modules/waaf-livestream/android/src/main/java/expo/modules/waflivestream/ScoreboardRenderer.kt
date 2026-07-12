@@ -8,16 +8,17 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
+import kotlin.math.roundToInt
 
 /**
  * Broadcast-style scoreboard inspired by UEFA / FIFA tournament graphics.
  */
 object ScoreboardRenderer {
   private const val DESIGN_WIDTH = 1280
-  private const val DESIGN_HEIGHT = 168
-  private const val LOGO_SIZE = 52f
-  private const val LOGO_SIZE_COMPACT = 36f
-  private const val LOGO_PAD = 10f
+  private const val DESIGN_HEIGHT = 132
+  private const val LOGO_SIZE = 44f
+  private const val LOGO_SIZE_COMPACT = 30f
+  private const val LOGO_PAD = 8f
 
   private val navyDark = Color.parseColor("#0B1D3A")
   private val navyMid = Color.parseColor("#122849")
@@ -39,8 +40,9 @@ object ScoreboardRenderer {
     logoAway: Bitmap? = null,
     layout: ScoreboardLayout = ScoreboardLayout.FULL,
     streamWidth: Int = DESIGN_WIDTH,
+    opacity: Float = 1f,
   ): Bitmap {
-    return if (layout.isCompact) {
+    val bitmap = if (layout.isCompact) {
       renderCompact(
         teamHome, teamAway, scoreHome, scoreAway, timer, period,
         logoHome, logoAway, layout, streamWidth,
@@ -51,6 +53,20 @@ object ScoreboardRenderer {
         logoHome, logoAway, streamWidth,
       )
     }
+    return applyOpacity(bitmap, opacity)
+  }
+
+  private fun applyOpacity(source: Bitmap, opacity: Float): Bitmap {
+    val o = opacity.coerceIn(0.1f, 1f)
+    if (o >= 0.99f) return source
+    val out = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(out)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+      alpha = (o * 255f).roundToInt().coerceIn(0, 255)
+    }
+    canvas.drawBitmap(source, 0f, 0f, paint)
+    if (source != out) source.recycle()
+    return out
   }
 
   private fun renderFullBar(
@@ -65,7 +81,7 @@ object ScoreboardRenderer {
     streamWidth: Int,
   ): Bitmap {
     val width = streamWidth.coerceAtLeast(320)
-    val height = (width * DESIGN_HEIGHT / DESIGN_WIDTH.toFloat()).toInt().coerceAtLeast(64)
+    val height = (width * DESIGN_HEIGHT / DESIGN_WIDTH.toFloat()).toInt().coerceAtLeast(52)
     val scale = width / DESIGN_WIDTH.toFloat()
 
     val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -79,9 +95,9 @@ object ScoreboardRenderer {
     val timerLabel = timer.ifBlank { "00:00" }
 
     paint.color = Color.argb(110, 0, 0, 0)
-    canvas.drawRoundRect(RectF(12f * scale, 14f * scale, width - 8f * scale, height - 6f * scale), 6f * scale, 6f * scale, paint)
+    canvas.drawRoundRect(RectF(6f * scale, 8f * scale, width - 6f * scale, height - 4f * scale), 6f * scale, 6f * scale, paint)
 
-    val bar = RectF(8f * scale, 8f * scale, width - 8f * scale, height - 10f * scale)
+    val bar = RectF(6f * scale, 6f * scale, width - 6f * scale, height - 6f * scale)
     paint.shader = LinearGradient(
       bar.left, bar.top, bar.left, bar.bottom,
       intArrayOf(navyDark, navyMid, navyLight),
@@ -92,65 +108,65 @@ object ScoreboardRenderer {
     paint.shader = null
 
     paint.color = gold
-    canvas.drawRect(bar.left, bar.top, bar.right, bar.top + 4f * scale, paint)
+    canvas.drawRect(bar.left, bar.top, bar.right, bar.top + 3f * scale, paint)
 
-    val headerBottom = bar.top + 44f * scale
+    val headerBottom = bar.top + 36f * scale
     paint.color = Color.argb(180, 0, 0, 0)
-    canvas.drawRect(bar.left, bar.top + 4f * scale, bar.right, headerBottom, paint)
+    canvas.drawRect(bar.left, bar.top + 3f * scale, bar.right, headerBottom, paint)
 
     paint.color = liveRed
-    canvas.drawCircle(bar.left + 28f * scale, bar.top + 26f * scale, 5f * scale, paint)
+    canvas.drawCircle(bar.left + 24f * scale, bar.top + 22f * scale, 4f * scale, paint)
 
     val livePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = white
-      textSize = 14f * scale
+      textSize = 12f * scale
       typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
       letterSpacing = 0.15f
     }
-    canvas.drawText("LIVE", bar.left + 40f * scale, bar.top + 30f * scale, livePaint)
+    canvas.drawText("LIVE", bar.left + 34f * scale, bar.top + 26f * scale, livePaint)
 
     val periodPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = goldBright
-      textSize = 16f * scale
+      textSize = 14f * scale
       typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
       letterSpacing = 0.08f
     }
-    canvas.drawText(periodLabel, bar.left + 110f * scale, bar.top + 31f * scale, periodPaint)
+    canvas.drawText(periodLabel, bar.left + 96f * scale, bar.top + 27f * scale, periodPaint)
 
     val headerTimerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = white
-      textSize = 22f * scale
+      textSize = 18f * scale
       typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
     }
     val headerTimerW = headerTimerPaint.measureText(timerLabel)
-    canvas.drawText(timerLabel, bar.right - headerTimerW - 20f * scale, bar.top + 32f * scale, headerTimerPaint)
+    canvas.drawText(timerLabel, bar.right - headerTimerW - 16f * scale, bar.top + 28f * scale, headerTimerPaint)
 
     paint.color = Color.argb(90, 212, 175, 55)
-    canvas.drawRect(bar.left + 16f * scale, headerBottom, bar.right - 16f * scale, headerBottom + 1.5f * scale, paint)
+    canvas.drawRect(bar.left + 12f * scale, headerBottom, bar.right - 12f * scale, headerBottom + 1.5f * scale, paint)
 
-    val rowTop = headerBottom + 10f * scale
-    val rowBottom = bar.bottom - 12f * scale
+    val rowTop = headerBottom + 8f * scale
+    val rowBottom = bar.bottom - 8f * scale
     val centerX = bar.centerX()
 
-    val homePill = RectF(bar.left + 18f * scale, rowTop, centerX - 118f * scale, rowBottom)
+    val homePill = RectF(bar.left + 14f * scale, rowTop, centerX - 100f * scale, rowBottom)
     drawTeamPill(canvas, homePill, home, Color.parseColor("#2563EB"), false, logoHome, scale)
 
-    val awayPill = RectF(centerX + 118f * scale, rowTop, bar.right - 18f * scale, rowBottom)
+    val awayPill = RectF(centerX + 100f * scale, rowTop, bar.right - 14f * scale, rowBottom)
     drawTeamPill(canvas, awayPill, away, Color.parseColor("#DC2626"), true, logoAway, scale)
 
-    val scoreBoxW = 200f * scale
+    val scoreBoxW = 170f * scale
     val scoreBox = RectF(centerX - scoreBoxW / 2f, rowTop, centerX + scoreBoxW / 2f, rowBottom)
     paint.color = Color.argb(240, 8, 18, 40)
-    canvas.drawRoundRect(scoreBox, 8f * scale, 8f * scale, paint)
+    canvas.drawRoundRect(scoreBox, 6f * scale, 6f * scale, paint)
     paint.style = Paint.Style.STROKE
     paint.strokeWidth = 2f * scale
     paint.color = gold
-    canvas.drawRoundRect(scoreBox, 8f * scale, 8f * scale, paint)
+    canvas.drawRoundRect(scoreBox, 6f * scale, 6f * scale, paint)
     paint.style = Paint.Style.FILL
 
     val scorePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = white
-      textSize = 36f * scale
+      textSize = 30f * scale
       typeface = Typeface.create(Typeface.DEFAULT_BOLD, Typeface.BOLD)
     }
     val scoreW = scorePaint.measureText(scoreText)
@@ -159,11 +175,11 @@ object ScoreboardRenderer {
 
     val centerTimerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = goldBright
-      textSize = 20f * scale
+      textSize = 16f * scale
       typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
     }
     val centerTimerW = centerTimerPaint.measureText(timerLabel)
-    canvas.drawText(timerLabel, centerX - centerTimerW / 2f, scoreBox.bottom - 8f * scale, centerTimerPaint)
+    canvas.drawText(timerLabel, centerX - centerTimerW / 2f, scoreBox.bottom - 6f * scale, centerTimerPaint)
 
     return bitmap
   }
@@ -180,8 +196,8 @@ object ScoreboardRenderer {
     layout: ScoreboardLayout,
     streamWidth: Int,
   ): Bitmap {
-    val width = (streamWidth * 0.56f).toInt().coerceIn(280, streamWidth)
-    val height = (width * 0.19f).toInt().coerceAtLeast(56)
+    val width = (streamWidth * 0.48f).toInt().coerceIn(260, streamWidth)
+    val height = (width * 0.15f).toInt().coerceAtLeast(48)
     val timerLabel = timer.ifBlank { "00:00" }
     val periodLabel = period.trim().ifBlank { "МАТЧ" }.uppercase()
 
@@ -192,33 +208,33 @@ object ScoreboardRenderer {
     val home = trimTeam(teamHome, if (logoHome != null) 10 else 14)
     val away = trimTeam(teamAway, if (logoAway != null) 10 else 14)
 
-    val bar = RectF(4f, 4f, width - 4f, height - 4f)
+    val bar = RectF(3f, 3f, width - 3f, height - 3f)
     paint.shader = LinearGradient(
       bar.left, bar.top, bar.left, bar.bottom,
       intArrayOf(navyDark, navyMid),
       floatArrayOf(0f, 1f),
       Shader.TileMode.CLAMP,
     )
-    canvas.drawRoundRect(bar, 8f, 8f, paint)
+    canvas.drawRoundRect(bar, 6f, 6f, paint)
     paint.shader = null
 
     paint.color = gold
-    canvas.drawRect(bar.left, bar.top, bar.right, bar.top + 3f, paint)
+    canvas.drawRect(bar.left, bar.top, bar.right, bar.top + 2f, paint)
 
-    val rowTop = bar.top + 8f
-    val rowBottom = bar.bottom - 8f
+    val rowTop = bar.top + 5f
+    val rowBottom = bar.bottom - 5f
     val centerX = bar.centerX()
 
-    val homePill = RectF(bar.left + 10f, rowTop, centerX - 72f, rowBottom)
+    val homePill = RectF(bar.left + 6f, rowTop, centerX - 60f, rowBottom)
     drawTeamPill(canvas, homePill, home, Color.parseColor("#2563EB"), false, logoHome, 1f, LOGO_SIZE_COMPACT)
 
-    val awayPill = RectF(centerX + 72f, rowTop, bar.right - 10f, rowBottom)
+    val awayPill = RectF(centerX + 60f, rowTop, bar.right - 6f, rowBottom)
     drawTeamPill(canvas, awayPill, away, Color.parseColor("#DC2626"), true, logoAway, 1f, LOGO_SIZE_COMPACT)
 
     val scoreText = "$scoreHome : $scoreAway"
     val scorePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = white
-      textSize = 28f
+      textSize = 24f
       typeface = Typeface.create(Typeface.DEFAULT_BOLD, Typeface.BOLD)
     }
     val scoreW = scorePaint.measureText(scoreText)
@@ -227,7 +243,7 @@ object ScoreboardRenderer {
 
     val timerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = goldBright
-      textSize = 18f
+      textSize = 15f
       typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
     }
     val timerW = timerPaint.measureText(timerLabel)
@@ -235,17 +251,17 @@ object ScoreboardRenderer {
 
     val periodPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = Color.argb(200, 255, 255, 255)
-      textSize = 10f
+      textSize = 9f
       typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
       letterSpacing = 0.06f
     }
     val periodW = periodPaint.measureText(periodLabel)
     val periodX = when (layout) {
-      ScoreboardLayout.LEFT -> bar.left + 8f
-      ScoreboardLayout.RIGHT -> bar.right - periodW - 8f
+      ScoreboardLayout.LEFT -> bar.left + 6f
+      ScoreboardLayout.RIGHT -> bar.right - periodW - 6f
       else -> centerX - periodW / 2f
     }
-    canvas.drawText(periodLabel, periodX, bar.top + 14f, periodPaint)
+    canvas.drawText(periodLabel, periodX, bar.top + 12f, periodPaint)
 
     return bitmap
   }
@@ -263,29 +279,29 @@ object ScoreboardRenderer {
     val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = Color.argb(210, 15, 30, 58)
     }
-    canvas.drawRoundRect(rect, 6f * scale, 6f * scale, bg)
+    canvas.drawRoundRect(rect, 5f * scale, 5f * scale, bg)
 
     val accent = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = accentColor }
     if (alignEnd) {
       canvas.drawRoundRect(
-        RectF(rect.right - 5f * scale, rect.top, rect.right, rect.bottom),
-        3f * scale, 3f * scale, accent,
+        RectF(rect.right - 4f * scale, rect.top, rect.right, rect.bottom),
+        2f * scale, 2f * scale, accent,
       )
     } else {
       canvas.drawRoundRect(
-        RectF(rect.left, rect.top, rect.left + 5f * scale, rect.bottom),
-        3f * scale, 3f * scale, accent,
+        RectF(rect.left, rect.top, rect.left + 4f * scale, rect.bottom),
+        2f * scale, 2f * scale, accent,
       )
     }
 
-    var textStartX = rect.left + 16f * scale
-    var textEndX = rect.right - 16f * scale
+    var textStartX = rect.left + 12f * scale
+    var textEndX = rect.right - 12f * scale
 
     if (logo != null) {
       val logoLeft = if (alignEnd) {
         rect.right - LOGO_PAD * scale - logoSize
       } else {
-        rect.left + LOGO_PAD * scale + 6f * scale
+        rect.left + LOGO_PAD * scale + 4f * scale
       }
       val logoTop = rect.centerY() - logoSize / 2f
       val logoRect = RectF(logoLeft, logoTop, logoLeft + logoSize, logoTop + logoSize)
@@ -293,32 +309,32 @@ object ScoreboardRenderer {
       val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(200, 255, 255, 255)
         style = Paint.Style.STROKE
-        strokeWidth = 2f * scale
+        strokeWidth = 1.5f * scale
       }
       canvas.drawBitmap(logo, null, logoRect, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
       canvas.drawOval(logoRect, ring)
 
       if (alignEnd) {
-        textEndX = logoRect.left - 8f * scale
+        textEndX = logoRect.left - 6f * scale
       } else {
-        textStartX = logoRect.right + 8f * scale
+        textStartX = logoRect.right + 6f * scale
       }
     }
 
     val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = whiteSoft
-      textSize = 24f * scale
+      textSize = 20f * scale
       typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
     }
     val maxW = textEndX - textStartX
     var size = textPaint.textSize
-    while (textPaint.measureText(teamName) > maxW && size > 12f * scale) {
+    while (textPaint.measureText(teamName) > maxW && size > 10f * scale) {
       size -= 1f * scale
       textPaint.textSize = size
     }
     val textW = textPaint.measureText(teamName)
     val x = if (alignEnd) textEndX - textW else textStartX
-    canvas.drawText(teamName, x, rect.centerY() + 9f * scale, textPaint)
+    canvas.drawText(teamName, x, rect.centerY() + 7f * scale, textPaint)
   }
 
   private fun trimTeam(name: String, maxLen: Int): String {

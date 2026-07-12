@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   DEFAULT_STREAM_SETTINGS,
   PLATFORM_LABELS,
+  OPACITY_PERCENT_OPTIONS,
   REPLAY_SECONDS_OPTIONS,
   SCOREBOARD_LAYOUT_HINTS,
   SCOREBOARD_LAYOUT_LABELS,
@@ -59,6 +60,61 @@ type Props = {
 function formatGroupsError(msg: string): string {
   if (!msg.includes('groups') && !/profile type/i.test(msg)) return msg;
   return msg.includes('вручную') ? msg : `${msg} Укажите сообщество вручную ниже.`;
+}
+
+function clampOpacity(value: number): number {
+  return Math.min(1, Math.max(0.1, Math.round(value * 100) / 100));
+}
+
+function OpacityControl({
+  label,
+  hint,
+  value,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  value: number;
+  onChange: (next: number) => void;
+}) {
+  const pct = Math.round(value * 100);
+  const stepDown = () => onChange(clampOpacity(value - 0.05));
+  const stepUp = () => onChange(clampOpacity(value + 0.05));
+
+  return (
+    <View style={styles.opacityBlock}>
+      <View style={styles.opacityHeader}>
+        <Text style={styles.blockTitle}>{label}</Text>
+        <Text style={styles.opacityValue}>{pct}%</Text>
+      </View>
+      <Text style={styles.hint}>{hint}</Text>
+      <View style={styles.opacityRow}>
+        <TouchableOpacity style={styles.opacityBtn} onPress={stepDown}>
+          <Text style={styles.opacityBtnText}>−</Text>
+        </TouchableOpacity>
+        <View style={styles.opacityTrack}>
+          <View style={[styles.opacityFill, { width: `${pct}%` }]} />
+        </View>
+        <TouchableOpacity style={styles.opacityBtn} onPress={stepUp}>
+          <Text style={styles.opacityBtnText}>+</Text>
+        </TouchableOpacity>
+      </View>
+      <View style={styles.platformRow}>
+        {OPACITY_PERCENT_OPTIONS.map((p) => {
+          const active = pct === p;
+          return (
+            <TouchableOpacity
+              key={p}
+              style={[styles.platformChip, active && styles.platformChipActive]}
+              onPress={() => onChange(p / 100)}
+            >
+              <Text style={[styles.platformChipText, active && styles.platformChipTextActive]}>{p}%</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
 }
 
 export function StreamSettingsScreen({ onClose }: Props) {
@@ -428,6 +484,20 @@ export function StreamSettingsScreen({ onClose }: Props) {
           })}
         </View>
         <Text style={styles.hint}>{SCOREBOARD_LAYOUT_HINTS[settings.scoreboardLayout]}</Text>
+
+        <OpacityControl
+          label="Прозрачность табло в эфире"
+          hint="Что видят зрители в VK. 100% — непрозрачное табло."
+          value={settings.scoreboardOpacity}
+          onChange={(scoreboardOpacity) => setSettings((prev) => ({ ...prev, scoreboardOpacity }))}
+        />
+
+        <OpacityControl
+          label="Прозрачность кнопок пульта"
+          hint="Только на экране оператора. 70% — полупрозрачные кнопки, больше видно кадр."
+          value={settings.operatorUiOpacity}
+          onChange={(operatorUiOpacity) => setSettings((prev) => ({ ...prev, operatorUiOpacity }))}
+        />
 
         <Text style={styles.sectionTitle}>Повтор в эфире</Text>
         <View style={styles.block}>
@@ -948,6 +1018,30 @@ const styles = StyleSheet.create({
   scopeOk: { color: '#4ade80' },
   scopePending: { color: '#fbbf24' },
   scopeHint: { color: '#888', fontSize: 11, lineHeight: 16, marginTop: 6, marginBottom: 4 },
+  opacityBlock: {
+    backgroundColor: '#1e1e1e',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  opacityHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  opacityValue: { color: '#4a90e2', fontWeight: 'bold', fontSize: 14 },
+  opacityRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8, marginBottom: 10 },
+  opacityBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#333',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#555',
+  },
+  opacityBtnText: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
+  opacityTrack: { flex: 1, height: 6, borderRadius: 3, backgroundColor: '#333', overflow: 'hidden' },
+  opacityFill: { height: 6, borderRadius: 3, backgroundColor: '#4a90e2' },
   adClipRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   adClipRemove: { padding: 8 },
 });

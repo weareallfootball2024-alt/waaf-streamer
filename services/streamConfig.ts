@@ -45,6 +45,12 @@ function normalizeReplaySeconds(value: unknown): number {
   return Math.min(15, Math.max(1, Math.round(n)));
 }
 
+function normalizeOpacity(value: unknown, fallback: number): number {
+  const n = typeof value === 'number' ? value : parseFloat(String(value ?? ''));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(1, Math.max(0.1, Math.round(n * 100) / 100));
+}
+
 export async function loadStreamSettings(): Promise<StreamSettings> {
   await hydratePlaylistSessionRtmp();
   try {
@@ -56,6 +62,8 @@ export async function loadStreamSettings(): Promise<StreamSettings> {
       ...parsed,
       streamQuality: normalizeStreamQuality(parsed.streamQuality),
       scoreboardLayout: normalizeScoreboardLayout(parsed.scoreboardLayout),
+      scoreboardOpacity: normalizeOpacity(parsed.scoreboardOpacity, DEFAULT_STREAM_SETTINGS.scoreboardOpacity),
+      operatorUiOpacity: normalizeOpacity(parsed.operatorUiOpacity, DEFAULT_STREAM_SETTINGS.operatorUiOpacity),
       replayEnabled: parsed.replayEnabled !== false,
       replaySeconds: normalizeReplaySeconds(parsed.replaySeconds),
       adClips: Array.isArray(parsed.adClips) ? parsed.adClips.slice(0, 3) : [],

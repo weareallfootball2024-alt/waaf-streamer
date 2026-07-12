@@ -945,6 +945,8 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   const [encoderQuality, setEncoderQuality] = useState<ResolvedStreamQuality>('medium');
   const streamQualitySettingRef = useRef<StreamQuality>('auto');
   const [scoreboardLayout, setScoreboardLayout] = useState<ScoreboardLayout>('center');
+  const [scoreboardOpacity, setScoreboardOpacity] = useState(1);
+  const [operatorUiOpacity, setOperatorUiOpacity] = useState(0.7);
   const [adClips, setAdClips] = useState<AdClipPreset[]>([]);
   const [showInsertSheet, setShowInsertSheet] = useState(false);
   const [videoInsertActive, setVideoInsertActive] = useState(false);
@@ -1114,6 +1116,8 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       setReplayEnabled(settings.replayEnabled);
       setReplaySeconds(settings.replaySeconds);
       setScoreboardLayout(settings.scoreboardLayout);
+      setScoreboardOpacity(settings.scoreboardOpacity);
+      setOperatorUiOpacity(settings.operatorUiOpacity);
     });
   }, []);
 
@@ -1123,11 +1127,17 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       setReplayEnabled(settings.replayEnabled);
       setReplaySeconds(settings.replaySeconds);
       setScoreboardLayout(settings.scoreboardLayout);
+      setScoreboardOpacity(settings.scoreboardOpacity);
+      setOperatorUiOpacity(settings.operatorUiOpacity);
       streamQualitySettingRef.current = settings.streamQuality;
       const resolved = await resolveEncoderQuality(settings.streamQuality);
       setEncoderQuality(isFreeTier ? 'low' : resolved);
     });
   }, [settingsOpen, isFreeTier]);
+
+  useEffect(() => {
+    pushScoreboardToNative();
+  }, [scoreboardOpacity, scoreboardLayout]);
 
   useEffect(() => {
     if (!isStreaming) {
@@ -1150,6 +1160,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       period: getPeriodLabel(period),
       logoHome: resolveLogoUri(match.logo_home) || undefined,
       logoAway: resolveLogoUri(match.logo_away) || undefined,
+      opacity: scoreboardOpacity,
     }).catch(() => {});
   };
 
@@ -2010,13 +2021,6 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
           )}
       </View>
       <SafeAreaView style={[styles.overlay, { paddingTop: Math.max(insets.top, 4), paddingLeft: Math.max(insets.left, 8), paddingRight: Math.max(insets.right, 8) }]} pointerEvents="box-none">
-        
-      <View style={styles.header}>
-            <TouchableOpacity onPress={() => { if (isStreaming) void stopStreamAndFinishVk(); onBack(); }} style={styles.backButton}><Text style={styles.backText}>{isStandaloneSession || isFreeTier ? 'ВЫХОД' : 'К РАСПИСАНИЮ'}</Text></TouchableOpacity>
-            <TouchableOpacity onPress={handleUndo} style={styles.undoButton}><Text style={styles.undoText}>↩ ОТМЕНА</Text></TouchableOpacity>
-            <View style={styles.timerBox}><Text style={styles.timerText}>{formatTimer(displaySeconds)}</Text><Text style={styles.periodText}>{period === 0 ? 'Разминка' : period === 1 ? '1-й Тайм' : period === 2 ? 'Перерыв' : period === 3 ? '2-й Тайм' : period === 4 ? 'Перерыв (ДВ)' : period === 5 ? 'Доп. время 1' : period === 6 ? 'Доп. время 2' : period === 7 ? '⚽ Пенальти' : 'Завершён'}</Text></View>
-            <View style={styles.headerInfo}><Text style={styles.matchTitle}>{match.team_home} vs {match.team_away}</Text></View>
-        </View>
         {isStreaming && streamHealth ? (
             <Text style={styles.streamHealthText}>{streamHealth}</Text>
         ) : null}
@@ -2034,6 +2038,14 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
               <Text style={styles.returnLiveText}>К МАТЧУ — вернуть камеру</Text>
             </TouchableOpacity>
         ) : null}
+
+        <View style={{ opacity: operatorUiOpacity }} pointerEvents="box-none">
+      <View style={styles.header}>
+            <TouchableOpacity onPress={() => { if (isStreaming) void stopStreamAndFinishVk(); onBack(); }} style={styles.backButton}><Text style={styles.backText}>{isStandaloneSession || isFreeTier ? 'ВЫХОД' : 'К РАСПИСАНИЮ'}</Text></TouchableOpacity>
+            <TouchableOpacity onPress={handleUndo} style={styles.undoButton}><Text style={styles.undoText}>↩ ОТМЕНА</Text></TouchableOpacity>
+            <View style={styles.timerBox}><Text style={styles.timerText}>{formatTimer(displaySeconds)}</Text><Text style={styles.periodText}>{period === 0 ? 'Разминка' : period === 1 ? '1-й Тайм' : period === 2 ? 'Перерыв' : period === 3 ? '2-й Тайм' : period === 4 ? 'Перерыв (ДВ)' : period === 5 ? 'Доп. время 1' : period === 6 ? 'Доп. время 2' : period === 7 ? '⚽ Пенальти' : 'Завершён'}</Text></View>
+            <View style={styles.headerInfo}><Text style={styles.matchTitle}>{match.team_home} vs {match.team_away}</Text></View>
+        </View>
 
         <View style={styles.scoreboard}>
             <View style={styles.teamControl}>
@@ -2207,6 +2219,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                     )}
                 </View>
             )}
+        </View>
         </View>
         
         {/* МОДАЛКА (без изменений) */}

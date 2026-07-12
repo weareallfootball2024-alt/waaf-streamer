@@ -89,6 +89,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   private var isMuted = false
   private var scoreboardReady = false
   private var scoreboardLayout = ScoreboardLayout.FULL
+  private var scoreboardOpacity = 1f
   private var encoderQuality: StreamQualityPreset = StreamQualityPreset.MEDIUM
   private var surfaceReady = false
 
@@ -572,6 +573,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
       logoAwayBitmap,
       scoreboardLayout,
       encoderQuality.width,
+      scoreboardOpacity,
     )
   }
 
@@ -779,6 +781,10 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     payload["scoreAway"]?.let { scoreAway = (it as? Number)?.toInt() ?: scoreAway }
     payload["timer"]?.toString()?.let { timerText = it }
     payload["period"]?.toString()?.let { periodText = it }
+    payload["opacity"]?.let {
+      val v = (it as? Number)?.toFloat() ?: scoreboardOpacity
+      scoreboardOpacity = v.coerceIn(0.1f, 1f)
+    }
 
     val nextHomeLogo = payload["logoHome"]?.toString()?.trim()?.takeIf { it.isNotEmpty() }
     val nextAwayLogo = payload["logoAway"]?.toString()?.trim()?.takeIf { it.isNotEmpty() }
