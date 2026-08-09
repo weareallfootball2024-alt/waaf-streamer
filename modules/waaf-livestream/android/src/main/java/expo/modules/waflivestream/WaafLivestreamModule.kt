@@ -77,6 +77,14 @@ class WaafLivestreamModule : Module() {
       AsyncFunction("zoomOut") { view: WaafLivestreamView ->
         view.zoomOut()
       }
+
+      AsyncFunction("setZoom") { view: WaafLivestreamView, level: Double ->
+        view.setZoomLevel(level.toFloat())
+      }
+
+      AsyncFunction("getZoomRange") { view: WaafLivestreamView ->
+        view.getZoomRangeMap()
+      }
     }
   }
 }

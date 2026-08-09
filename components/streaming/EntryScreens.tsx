@@ -45,6 +45,15 @@ const styles = StyleSheet.create({
     marginBottom: 28,
     lineHeight: 18,
   },
+  oauthHint: {
+    color: '#6b7280',
+    fontSize: 11,
+    textAlign: 'center',
+    lineHeight: 16,
+    marginBottom: 18,
+    marginTop: -12,
+    paddingHorizontal: 8,
+  },
   balanceCard: {
     backgroundColor: '#1a4384',
     borderRadius: 14,
@@ -261,6 +270,10 @@ export function VkLoginScreen({ onBack, onSuccess }: VkLoginProps) {
       <Text style={styles.title}>VK</Text>
       <Text style={styles.subtitle}>
         Вход для матчей вне платформы и трансляций в VK Видео
+      </Text>
+      <Text style={styles.oauthHint}>
+        Откроется браузер. После входа нажмите «Открыть WAAF Streamer». Если браузер зациклится
+        «войти через приложение» — откройте мывсефутбол.рф в Chrome, войдите в VK и повторите.
       </Text>
       <TouchableOpacity
         style={[styles.btn, { backgroundColor: '#0077FF' }]}

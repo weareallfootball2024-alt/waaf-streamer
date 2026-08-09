@@ -1,15 +1,12 @@
 import * as Linking from 'expo-linking';
 import * as SecureStore from 'expo-secure-store';
-import * as WebBrowser from 'expo-web-browser';
 
 import { API_URL } from '../constants/api';
-
-WebBrowser.maybeCompleteAuthSession();
 
 const VK_TOKEN_KEY = 'vk_access_token';
 const VK_USER_ID_KEY = 'vk_user_id';
 const VK_CAPABILITIES_KEY = 'vk_capabilities_cache';
-const APP_OAUTH_RETURN = Linking.createURL('oauth/vk');
+const OAUTH_WAIT_MS = 5 * 60 * 1000;
 
 export type VkCapabilities = {
   groups: boolean;
@@ -92,17 +89,29 @@ function parseAuthResultUrl(url: string) {
   };
 }
 
-function authSessionErrorMessage(result: WebBrowser.WebBrowserAuthSessionResult): string {
-  if (result.type === 'cancel' || result.type === 'dismiss') {
-    return `VK: страница не загрузилась или вход прерван (${result.type})`;
+function isVkOauthReturnUrl(url: string): boolean {
+  return /oauth\/vk/i.test(url) || url.startsWith('waafstreamer://oauth/vk');
+}
+
+async function completeVkSession(session: string): Promise<string> {
+  const completeRes = await fetch(`${API_URL}/api/auth/vk-id/complete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session }),
+  });
+  const data = await completeRes.json();
+  if (!completeRes.ok) {
+    throw new Error(data.error || 'Ошибка завершения VK авторизации');
   }
-  if (result.type === 'success' && result.url) {
-    const { error, errorDescription } = parseAuthResultUrl(result.url);
-    if (error) {
-      return errorDescription || `VK: ${error}`;
-    }
+
+  await SecureStore.setItemAsync(VK_TOKEN_KEY, data.access_token);
+  if (data.user_id != null) {
+    await SecureStore.setItemAsync(VK_USER_ID_KEY, String(data.user_id));
+  } else {
+    await fetchAndStoreVkUserId(data.access_token);
   }
-  return `VK не вернул авторизацию (${result.type})`;
+  await fetchAndStoreVkCapabilities();
+  return data.access_token as string;
 }
 
 export async function fetchAndStoreVkUserId(accessToken?: string): Promise<string | null> {
@@ -130,37 +139,70 @@ export async function ensureStoredVkUserId(): Promise<string | null> {
 export async function loginWithVk(): Promise<string> {
   const startUrl = `${API_URL}/api/auth/vk-id/start`;
 
-  const result = await WebBrowser.openAuthSessionAsync(startUrl, APP_OAUTH_RETURN);
-  if (result.type !== 'success' || !result.url) {
-    throw new Error(authSessionErrorMessage(result));
-  }
+  return new Promise<string>((resolve, reject) => {
+    let settled = false;
+    let urlSub: { remove: () => void } | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-  const { session, error, errorDescription } = parseAuthResultUrl(result.url);
-  if (error) {
-    throw new Error(errorDescription || `VK: ${error}`);
-  }
-  if (!session) {
-    throw new Error('VK не вернул сессию авторизации');
-  }
+    const cleanup = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = null;
+      urlSub?.remove();
+      urlSub = null;
+    };
 
-  const completeRes = await fetch(`${API_URL}/api/auth/vk-id/complete`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ session }),
+    const fail = (message: string) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error(message));
+    };
+
+    const succeed = (token: string) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(token);
+    };
+
+    const handleUrl = async (url: string | null) => {
+      if (!url || !isVkOauthReturnUrl(url) || settled) return;
+      const { session, error, errorDescription } = parseAuthResultUrl(url);
+      if (error) {
+        fail(errorDescription || `VK: ${error}`);
+        return;
+      }
+      if (!session) {
+        fail('VK не вернул сессию авторизации');
+        return;
+      }
+      try {
+        const token = await completeVkSession(session);
+        succeed(token);
+      } catch (e) {
+        fail(e instanceof Error ? e.message : 'Ошибка завершения VK авторизации');
+      }
+    };
+
+    timeoutId = setTimeout(() => {
+      fail('VK: время ожидания авторизации истекло. Откройте вход снова.');
+    }, OAUTH_WAIT_MS);
+
+    urlSub = Linking.addEventListener('url', ({ url }) => {
+      void handleUrl(url);
+    });
+
+    void (async () => {
+      try {
+        const initial = await Linking.getInitialURL();
+        await handleUrl(initial);
+        if (settled) return;
+        await Linking.openURL(startUrl);
+      } catch (e) {
+        fail(e instanceof Error ? e.message : 'Не удалось открыть вход VK');
+      }
+    })();
   });
-  const data = await completeRes.json();
-  if (!completeRes.ok) {
-    throw new Error(data.error || 'Ошибка завершения VK авторизации');
-  }
-
-  await SecureStore.setItemAsync(VK_TOKEN_KEY, data.access_token);
-  if (data.user_id != null) {
-    await SecureStore.setItemAsync(VK_USER_ID_KEY, String(data.user_id));
-  } else {
-    await fetchAndStoreVkUserId(data.access_token);
-  }
-  await fetchAndStoreVkCapabilities();
-  return data.access_token;
 }
 
 export async function fetchAdminGroups(accessToken?: string): Promise<VkGroup[]> {

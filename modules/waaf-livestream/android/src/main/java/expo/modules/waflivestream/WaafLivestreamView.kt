@@ -630,6 +630,37 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     adjustZoom(-step)
   }
 
+  fun setZoomLevel(level: Float) {
+    val camera = genericStream.videoSource as? Camera2Source ?: return
+    if (!camera.isRunning()) return
+    try {
+      val range = camera.getZoomRange()
+      val next = level.coerceIn(range.lower, range.upper)
+      camera.setZoom(next)
+      Log.d(TAG, "camera zoom=$next range=${range.lower}..${range.upper}")
+    } catch (e: Exception) {
+      Log.w(TAG, "setZoom failed", e)
+    }
+  }
+
+  fun getZoomRangeMap(): Map<String, Float> {
+    val camera = genericStream.videoSource as? Camera2Source
+    if (camera == null || !camera.isRunning()) {
+      return mapOf("min" to 1f, "max" to 1f, "current" to 1f)
+    }
+    return try {
+      val range = camera.getZoomRange()
+      mapOf(
+        "min" to range.lower,
+        "max" to range.upper,
+        "current" to camera.getZoom().coerceIn(range.lower, range.upper),
+      )
+    } catch (e: Exception) {
+      Log.w(TAG, "getZoomRange failed", e)
+      mapOf("min" to 1f, "max" to 1f, "current" to 1f)
+    }
+  }
+
   private fun adjustZoom(delta: Float) {
     val camera = genericStream.videoSource as? Camera2Source ?: return
     if (!camera.isRunning()) return

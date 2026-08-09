@@ -62,4 +62,6 @@ export type WaafLivestreamViewRef = {
   triggerReplay: (seconds?: number, teamSide?: 'home' | 'away') => Promise<void>;
   zoomIn: () => Promise<void>;
   zoomOut: () => Promise<void>;
+  setZoom: (level: number) => Promise<void>;
+  getZoomRange: () => Promise<{ min: number; max: number; current: number }>;
 };

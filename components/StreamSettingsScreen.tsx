@@ -650,13 +650,19 @@ export function StreamSettingsScreen({ onClose }: Props) {
           <View style={styles.block}>
             <Text style={styles.blockTitle}>VK Live — сообщество</Text>
             {!vkLoggedIn ? (
-              <TouchableOpacity style={styles.btnVk} onPress={handleVkLogin} disabled={vkLoading}>
-                {vkLoading ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.btnVkText}>ВОЙТИ ЧЕРЕЗ VK</Text>
-                )}
-              </TouchableOpacity>
+              <>
+                <TouchableOpacity style={styles.btnVk} onPress={handleVkLogin} disabled={vkLoading}>
+                  {vkLoading ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.btnVkText}>ВОЙТИ ЧЕРЕЗ VK</Text>
+                  )}
+                </TouchableOpacity>
+                <Text style={[styles.hint, { marginTop: 10 }]}>
+                  Откроется браузер. После входа нажмите «Открыть WAAF Streamer». Если цикл «войти через
+                  приложение» — откройте мывсефутбол.рф в Chrome, войдите в VK и повторите.
+                </Text>
+              </>
             ) : (
               <>
                 <View style={styles.vkRow}>

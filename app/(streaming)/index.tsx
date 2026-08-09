@@ -27,6 +27,7 @@ import { parseOperatorToken } from '../../constants/streamPlatforms';
 import { StandaloneMatchSetupScreen } from '../../components/StandaloneMatchSetupScreen';
 import { StandalonePayScreen } from '../../components/StandalonePayScreen';
 import { StreamSettingsScreen } from '../../components/StreamSettingsScreen';
+import { VerticalZoomSlider } from '../../components/VerticalZoomSlider';
 import { VideoInsertSheet, pickVideoFromLibrary } from '../../components/VideoInsertSheet';
 import type { AdClipPreset, ScoreboardLayout } from '../../constants/streamPlatforms';
 import {
@@ -947,6 +948,9 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   const [scoreboardLayout, setScoreboardLayout] = useState<ScoreboardLayout>('center');
   const [scoreboardOpacity, setScoreboardOpacity] = useState(1);
   const [operatorUiOpacity, setOperatorUiOpacity] = useState(0.7);
+  const [zoomMin, setZoomMin] = useState(1);
+  const [zoomMax, setZoomMax] = useState(1);
+  const [zoomLevel, setZoomLevel] = useState(1);
   const [adClips, setAdClips] = useState<AdClipPreset[]>([]);
   const [showInsertSheet, setShowInsertSheet] = useState(false);
   const [videoInsertActive, setVideoInsertActive] = useState(false);
@@ -1567,13 +1571,36 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     videoRef.current?.stopVideoInsert().catch(() => {});
   };
 
-  const handleZoomIn = () => {
-    videoRef.current?.zoomIn().catch(() => {});
+  const refreshZoomRange = async () => {
+    try {
+      const range = await videoRef.current?.getZoomRange();
+      if (!range) return;
+      const min = Number(range.min) || 1;
+      const max = Math.max(min, Number(range.max) || min);
+      const current = Number(range.current);
+      setZoomMin(min);
+      setZoomMax(max);
+      setZoomLevel(Number.isFinite(current) ? Math.min(max, Math.max(min, current)) : min);
+    } catch {
+      /* camera not ready */
+    }
   };
 
-  const handleZoomOut = () => {
-    videoRef.current?.zoomOut().catch(() => {});
+  const handleZoomChange = (next: number) => {
+    const clamped = Math.min(zoomMax, Math.max(zoomMin, next));
+    setZoomLevel(clamped);
+    videoRef.current?.setZoom(clamped).catch(() => {});
   };
+
+  useEffect(() => {
+    if (!canStream || !permissionGranted) return;
+    const t1 = setTimeout(() => { void refreshZoomRange(); }, 800);
+    const t2 = setTimeout(() => { void refreshZoomRange(); }, 2500);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [canStream, permissionGranted, isStreaming]);
 
   const handleTriggerReplay = async (teamSide?: 'home' | 'away') => {
     if (!replayEnabled || isFreeTier) return;
@@ -2039,6 +2066,17 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             </TouchableOpacity>
         ) : null}
 
+        {canStream && permissionGranted && zoomMax > zoomMin ? (
+          <VerticalZoomSlider
+            value={zoomLevel}
+            min={zoomMin}
+            max={zoomMax}
+            opacity={operatorUiOpacity}
+            disabled={videoInsertActive || replayLoading}
+            onChange={handleZoomChange}
+          />
+        ) : null}
+
         <View style={{ opacity: operatorUiOpacity }} pointerEvents="box-none">
       <View style={styles.header}>
             <TouchableOpacity onPress={() => { if (isStreaming) void stopStreamAndFinishVk(); onBack(); }} style={styles.backButton}><Text style={styles.backText}>{isStandaloneSession || isFreeTier ? 'ВЫХОД' : 'К РАСПИСАНИЮ'}</Text></TouchableOpacity>
@@ -2191,24 +2229,6 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                     )}
                     {canStream && (
                     <>
-                    {isStreaming && (
-                      <>
-                        <TouchableOpacity
-                          style={[styles.btnZoom, (videoInsertActive || replayLoading) && { opacity: 0.45 }]}
-                          onPress={handleZoomOut}
-                          disabled={videoInsertActive || replayLoading}
-                        >
-                          <Text style={styles.btnZoomText}>−</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[styles.btnZoom, (videoInsertActive || replayLoading) && { opacity: 0.45 }]}
-                          onPress={handleZoomIn}
-                          disabled={videoInsertActive || replayLoading}
-                        >
-                          <Text style={styles.btnZoomText}>+</Text>
-                        </TouchableOpacity>
-                      </>
-                    )}
                     <TouchableOpacity style={[styles.btnMic, isMuted && styles.btnMicOff]} onPress={toggleMic}>
                         <Text style={styles.btnMicText}>{isMuted ? "🔇" : "🎙️"}</Text>
                     </TouchableOpacity>
@@ -2421,22 +2441,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#ccc',
-  },
-  btnZoom: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ccc',
-  },
-  btnZoomText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 22,
-    lineHeight: 24,
   },
   btnMicSettings: {
     width: 44,

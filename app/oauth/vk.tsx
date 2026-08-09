@@ -2,7 +2,7 @@ import { useRouter } from 'expo-router';
 import { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 
-/** Deep-link target for VK OAuth return; WebBrowser intercepts the URL before navigation. */
+/** Deep-link landing for VK OAuth (`waafstreamer://oauth/vk`). Session is handled by `loginWithVk` Linking listener. */
 export default function VkOAuthReturnScreen() {
   const router = useRouter();
 
