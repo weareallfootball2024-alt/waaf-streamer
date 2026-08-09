@@ -63,5 +63,6 @@ export type WaafLivestreamViewRef = {
   zoomIn: () => Promise<void>;
   zoomOut: () => Promise<void>;
   setZoom: (level: number) => Promise<void>;
+  animateZoom: (level: number, durationMs?: number) => Promise<void>;
   getZoomRange: () => Promise<{ min: number; max: number; current: number }>;
 };

@@ -27,7 +27,7 @@ import { parseOperatorToken } from '../../constants/streamPlatforms';
 import { StandaloneMatchSetupScreen } from '../../components/StandaloneMatchSetupScreen';
 import { StandalonePayScreen } from '../../components/StandalonePayScreen';
 import { StreamSettingsScreen } from '../../components/StreamSettingsScreen';
-import { VerticalZoomSlider } from '../../components/VerticalZoomSlider';
+import { ZoomPresetButtons } from '../../components/ZoomPresetButtons';
 import { VideoInsertSheet, pickVideoFromLibrary } from '../../components/VideoInsertSheet';
 import type { AdClipPreset, ScoreboardLayout } from '../../constants/streamPlatforms';
 import {
@@ -1586,10 +1586,12 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     }
   };
 
-  const handleZoomChange = (next: number) => {
-    const clamped = Math.min(zoomMax, Math.max(zoomMin, next));
+  const handleZoomSelect = (preset: number) => {
+    const clamped = Math.min(zoomMax, Math.max(zoomMin, preset));
     setZoomLevel(clamped);
-    videoRef.current?.setZoom(clamped).catch(() => {});
+    videoRef.current?.animateZoom(clamped, 300).catch(() => {
+      videoRef.current?.setZoom(clamped).catch(() => {});
+    });
   };
 
   useEffect(() => {
@@ -2067,13 +2069,13 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
         ) : null}
 
         {canStream && permissionGranted && zoomMax > zoomMin ? (
-          <VerticalZoomSlider
+          <ZoomPresetButtons
             value={zoomLevel}
             min={zoomMin}
             max={zoomMax}
             opacity={operatorUiOpacity}
             disabled={videoInsertActive || replayLoading}
-            onChange={handleZoomChange}
+            onSelect={handleZoomSelect}
           />
         ) : null}
 

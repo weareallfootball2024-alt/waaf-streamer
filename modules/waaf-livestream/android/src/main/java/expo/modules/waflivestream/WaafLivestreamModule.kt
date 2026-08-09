@@ -82,6 +82,10 @@ class WaafLivestreamModule : Module() {
         view.setZoomLevel(level.toFloat())
       }
 
+      AsyncFunction("animateZoom") { view: WaafLivestreamView, level: Double, durationMs: Int? ->
+        view.animateZoomTo(level.toFloat(), (durationMs ?: 280).toLong())
+      }
+
       AsyncFunction("getZoomRange") { view: WaafLivestreamView ->
         view.getZoomRangeMap()
       }

@@ -104,6 +104,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   private var timerText = "00:00"
   private var periodText = ""
   private val mainHandler = Handler(Looper.getMainLooper())
+  private var zoomAnimRunnable: Runnable? = null
   private var pendingEndpoint: String? = null
   private val publishRunnable = Runnable { publishStream() }
   private val deferredFilterRunnable = Runnable { ensureScoreboardFilter() }
@@ -631,6 +632,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   }
 
   fun setZoomLevel(level: Float) {
+    cancelZoomAnimation()
     val camera = genericStream.videoSource as? Camera2Source ?: return
     if (!camera.isRunning()) return
     try {
@@ -641,6 +643,58 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     } catch (e: Exception) {
       Log.w(TAG, "setZoom failed", e)
     }
+  }
+
+  fun animateZoomTo(target: Float, durationMs: Long = 280L) {
+    val camera = genericStream.videoSource as? Camera2Source ?: return
+    if (!camera.isRunning()) return
+    val range = try {
+      camera.getZoomRange()
+    } catch (e: Exception) {
+      Log.w(TAG, "animateZoom range failed", e)
+      return
+    }
+    val to = target.coerceIn(range.lower, range.upper)
+    val from = try {
+      camera.getZoom()
+    } catch (e: Exception) {
+      return
+    }
+    if (kotlin.math.abs(to - from) < 0.001f) {
+      try { camera.setZoom(to) } catch (_: Exception) {}
+      return
+    }
+    cancelZoomAnimation()
+    val startAt = android.os.SystemClock.uptimeMillis()
+    val duration = durationMs.coerceAtLeast(80L)
+    val runnable = object : Runnable {
+      override fun run() {
+        val cam = genericStream.videoSource as? Camera2Source
+        if (cam == null || !cam.isRunning()) return
+        val elapsed = android.os.SystemClock.uptimeMillis() - startAt
+        val t = (elapsed.toFloat() / duration).coerceIn(0f, 1f)
+        val eased = t * t * (3f - 2f * t)
+        val next = from + (to - from) * eased
+        try {
+          cam.setZoom(next)
+        } catch (e: Exception) {
+          Log.w(TAG, "animateZoom step failed", e)
+          return
+        }
+        if (t < 1f) {
+          mainHandler.postDelayed(this, 16L)
+        } else {
+          zoomAnimRunnable = null
+        }
+      }
+    }
+    zoomAnimRunnable = runnable
+    mainHandler.post(runnable)
+  }
+
+  private fun cancelZoomAnimation() {
+    zoomAnimRunnable?.let { mainHandler.removeCallbacks(it) }
+    zoomAnimRunnable = null
   }
 
   fun getZoomRangeMap(): Map<String, Float> {
@@ -662,6 +716,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   }
 
   private fun adjustZoom(delta: Float) {
+    cancelZoomAnimation()
     val camera = genericStream.videoSource as? Camera2Source ?: return
     if (!camera.isRunning()) return
     try {
