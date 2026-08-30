@@ -155,7 +155,7 @@ export function StandalonePayScreen({
         <Text style={styles.matchTitle}>
           {matchContext.teamHome} vs {matchContext.teamAway}
         </Text>
-        <Text style={styles.subtitle}>Матч вне турнира</Text>
+        <Text style={styles.subtitle}>Быстрый матч</Text>
 
         <View style={styles.balanceBox}>
           <Text style={styles.balanceLabel}>На балансе</Text>

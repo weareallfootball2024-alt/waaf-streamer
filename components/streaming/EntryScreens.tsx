@@ -345,7 +345,7 @@ export function StandaloneTierScreen({ onBack, onSelect, matchPriceRub }: Standa
       <TouchableOpacity onPress={onBack}>
         <Text style={styles.back}>◀ НАЗАД</Text>
       </TouchableOpacity>
-      <Text style={styles.title}>Вне турнира</Text>
+      <Text style={styles.title}>Быстрый матч</Text>
       <Text style={styles.subtitle}>Выберите тариф трансляции</Text>
 
       <TouchableOpacity style={[styles.card, styles.cardSecondary]} onPress={() => onSelect('free')}>
@@ -440,14 +440,14 @@ export function AuthenticatedHomeScreen({
       ) : null}
 
       <Text style={styles.title}>Личный кабинет</Text>
-      <Text style={styles.subtitle}>Токен турнира или матч вне турнира</Text>
+      <Text style={styles.subtitle}>Токен турнира или быстрый матч</Text>
 
       {balanceRub != null && (
         <View style={styles.balanceCard}>
           <Text style={styles.balanceLabel}>Баланс трансляций</Text>
           <Text style={styles.balanceValue}>{balanceRub} ₽</Text>
           {matchPriceRub != null && (
-            <Text style={styles.balanceHint}>{matchPriceRub} ₽ за матч вне турнира</Text>
+            <Text style={styles.balanceHint}>{matchPriceRub} ₽ за быстрый матч</Text>
           )}
         </View>
       )}
@@ -470,7 +470,7 @@ export function AuthenticatedHomeScreen({
       </Text>
 
       <TouchableOpacity style={[styles.card, styles.cardSecondary, { marginTop: 24 }]} onPress={onOutsideTournament}>
-        <Text style={styles.cardTitle}>Вне турнира</Text>
+        <Text style={styles.cardTitle}>Быстрый матч</Text>
         <Text style={styles.cardDesc}>
           Быстрый матч без турнира: бесплатный тариф или премиум с балансом.
         </Text>

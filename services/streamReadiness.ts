@@ -9,7 +9,7 @@ export async function checkStreamReadiness(): Promise<StreamReadiness> {
     return {
       ok: false,
       message:
-        'Для матча вне турнира нужно войти через VK в настройках трансляции и выбрать сообщество.',
+        'Для быстрого матча нужно войти через VK в настройках трансляции и выбрать сообщество.',
     };
   }
 

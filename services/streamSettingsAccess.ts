@@ -64,7 +64,7 @@ export async function canOpenStreamSettings(
     return {
       allowed: false,
       reason:
-        'Настройки доступны с токеном турнира, после оплаты матча вне турнира или входа суперадмина WAAF.',
+        'Настройки доступны с токеном турнира, после оплаты быстрого матча или входа суперадмина WAAF.',
     };
   } catch {
     return {

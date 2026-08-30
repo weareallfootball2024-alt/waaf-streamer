@@ -21,6 +21,9 @@ export type StandaloneMatchContext = {
   teamAway: string;
   awayClubId?: number;
   awayLogoUri?: string;
+  broadcastTitle?: string;
+  sportType?: 'football' | 'futsal';
+  halfDuration?: number;
   rtmpUrl?: string;
   streamKey?: string;
 };
@@ -39,8 +42,9 @@ export function buildStandaloneMatch(ctx: StandaloneMatchContext) {
     score_home: 0,
     score_away: 0,
     current_period: 0,
-    sport_type: 'football',
-    half_duration: 45,
+    sport_type: ctx.sportType || 'football',
+    half_duration: ctx.halfDuration ?? 45,
+    broadcast_title: ctx.broadcastTitle || null,
     tournament_id: null,
     standalone_tier: ctx.tier,
   };
@@ -78,6 +82,9 @@ export async function createStandaloneLiveMatch(
       team_away: ctx.teamAway,
       club_logo_url: ctx.clubLogoUri || undefined,
       away_logo_url: ctx.awayLogoUri || undefined,
+      broadcast_title: ctx.broadcastTitle?.trim() || undefined,
+      sport_type: ctx.sportType || 'football',
+      half_duration: ctx.halfDuration ?? 45,
     }),
   });
   const data = await res.json();

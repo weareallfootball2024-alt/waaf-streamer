@@ -53,6 +53,13 @@ import { canOpenStreamSettings } from '../../services/streamSettingsAccess';
 import { stopVkLiveBroadcast, startVkLiveBroadcast, parseVkVideoRef, vkStopBroadcastMessage, vkStreamErrorMessage, resolveActiveVkLiveWithRetry, getStoredVkToken } from '../../services/vkAuth';
 import { saveVkLiveSession, loadVkLiveSession, clearVkLiveSession } from '../../services/vkLiveSession';
 import {
+  saveVkFinishPending,
+  loadVkFinishPending,
+  clearVkFinishPending,
+  type VkFinishPending,
+} from '../../services/vkFinishPending';
+import { buildVkStreamTitle } from '../../utils/vkStreamTitle';
+import {
   getStreamPermissionState,
   requestStreamPermissions,
 } from '../../services/streamPermissions';
@@ -226,7 +233,7 @@ function TournamentLoginScreen({ onNext, onOpenSettings, onStandalone, initialTo
                 style={[styles.btnPrimary, { backgroundColor: '#2a5a2a', marginTop: 14 }]}
                 onPress={onStandalone}
             >
-                <Text style={styles.btnText}>МАТЧ ВНЕ ТУРНИРА</Text>
+                <Text style={styles.btnText}>БЫСТРЫЙ МАТЧ</Text>
             </TouchableOpacity>
 
             <TouchableOpacity onPress={() => setShowIdMode(!showIdMode)} style={{ marginTop: 20 }}>
@@ -951,6 +958,11 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   const [zoomMin, setZoomMin] = useState(1);
   const [zoomMax, setZoomMax] = useState(1);
   const [zoomLevel, setZoomLevel] = useState(1);
+  const [tournamentName, setTournamentName] = useState(
+    typeof match.tournament_name === 'string' ? match.tournament_name : '',
+  );
+  const [vkFinishPending, setVkFinishPending] = useState<VkFinishPending | null>(null);
+  const [vkFinishLoading, setVkFinishLoading] = useState(false);
   const [adClips, setAdClips] = useState<AdClipPreset[]>([]);
   const [showInsertSheet, setShowInsertSheet] = useState(false);
   const [videoInsertActive, setVideoInsertActive] = useState(false);
@@ -991,6 +1003,8 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
   const logoAway = match.logo_away;
   const sportType = match.sport_type || 'football'; 
   const halfDuration = match.half_duration || 45;
+  const pastRegulationHalf =
+    sportType === 'football' && (period === 1 || period === 3) && displaySeconds >= halfDuration * 60;
   
   // Веб-пульт (токен): только табло, без камеры. Standalone / free tier / stream-токен / allow_stream — с камерой.
   const isFreeTier = standaloneTier === 'free' || match.standalone_tier === 'free';
@@ -1045,6 +1059,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     fetch(`${API_URL}/api/tournaments/${tid}`)
       .then(r => r.json())
       .then(tourData => {
+        if (tourData?.name) setTournamentName(String(tourData.name));
         let cfg: any = {};
         if (tourData.structure_config) {
           cfg = typeof tourData.structure_config === 'string' ? JSON.parse(tourData.structure_config) : tourData.structure_config;
@@ -1108,6 +1123,10 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     }, 1000);
     return () => clearInterval(interval);
   }, [timerBase, timerUpdatedAt, isTimerRunning, timerDirection]);
+
+  useEffect(() => {
+    void loadVkFinishPending().then(setVkFinishPending);
+  }, []);
 
   useEffect(() => {
     loadStreamSettings().then(async (settings) => {
@@ -1223,11 +1242,13 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     });
   };
 
-  const finishVkStudioBroadcast = async (): Promise<{ ok: boolean; message: string }> => {
+  const finishVkStudioBroadcast = async (): Promise<{ ok: boolean; message: string; attempted: boolean }> => {
     try {
       const settings = await loadStreamSettings();
       if (settings.activePlatform !== 'vk' || !settings.vk.communityId) {
-        return { ok: true, message: '' };
+        await clearVkFinishPending();
+        setVkFinishPending(null);
+        return { ok: true, message: '', attempted: false };
       }
       const session = await loadVkLiveSession();
       const parsed = parseVkVideoRef(settings.vk.embedUrl);
@@ -1239,22 +1260,90 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
         });
         if (active) videoId = active.videoId;
       }
+      const groupId = session?.groupId ?? settings.vk.communityId;
+      const embedUrl = session?.embedUrl ?? settings.vk.embedUrl;
       const result = await stopVkLiveBroadcast({
-        groupId: session?.groupId ?? settings.vk.communityId,
+        groupId,
         videoId,
-        embedUrl: session?.embedUrl ?? settings.vk.embedUrl,
+        embedUrl,
       });
-      await clearVkLiveSession();
+      if (result.ok) {
+        await clearVkLiveSession();
+        await clearVkFinishPending();
+        setVkFinishPending(null);
+      } else {
+        const pending: VkFinishPending = {
+          groupId,
+          videoId,
+          embedUrl,
+          failedAt: Date.now(),
+          lastError: result.error,
+        };
+        await saveVkFinishPending(pending);
+        setVkFinishPending(pending);
+      }
       return {
         ok: result.ok,
         message: vkStopBroadcastMessage({ ok: result.ok, error: result.error }),
+        attempted: true,
       };
     } catch (e) {
       console.warn('[vk] stop broadcast failed', e);
+      const settings = await loadStreamSettings().catch(() => null);
+      const session = await loadVkLiveSession().catch(() => null);
+      if (settings?.vk?.communityId) {
+        const pending: VkFinishPending = {
+          groupId: session?.groupId ?? settings.vk.communityId,
+          videoId: session?.videoId,
+          embedUrl: session?.embedUrl ?? settings.vk.embedUrl,
+          failedAt: Date.now(),
+          lastError: 'network_error',
+        };
+        await saveVkFinishPending(pending);
+        setVkFinishPending(pending);
+      }
       return {
         ok: false,
         message: vkStopBroadcastMessage({ ok: false, error: 'network_error' }),
+        attempted: true,
       };
+    }
+  };
+
+  const handleRetryFinishVk = async () => {
+    if (vkFinishLoading) return;
+    setVkFinishLoading(true);
+    try {
+      const pending = vkFinishPending ?? (await loadVkFinishPending());
+      if (!pending) return;
+      let videoId = pending.videoId;
+      if (!videoId) {
+        const active = await resolveActiveVkLiveWithRetry(pending.groupId, { attempts: 4, delayMs: 2000 });
+        if (active) videoId = active.videoId;
+      }
+      const result = await stopVkLiveBroadcast({
+        groupId: pending.groupId,
+        videoId,
+        embedUrl: pending.embedUrl,
+      });
+      if (result.ok) {
+        await clearVkLiveSession();
+        await clearVkFinishPending();
+        setVkFinishPending(null);
+        Alert.alert('Готово', 'Трансляция в VK Studio завершена.');
+      } else {
+        const next: VkFinishPending = {
+          ...pending,
+          videoId,
+          failedAt: Date.now(),
+          lastError: result.error,
+        };
+        await saveVkFinishPending(next);
+        setVkFinishPending(next);
+        Alert.alert('VK', vkStopBroadcastMessage({ ok: false, error: result.error }));
+      }
+    } finally {
+      setVkFinishLoading(false);
     }
   };
 
@@ -1392,7 +1481,14 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             } else if (settings.activePlatform === 'vk' && settings.vk.communityId) {
               const vkToken = await getStoredVkToken();
               if (vkToken) {
-                const matchTitle = `${match.team_home || match.teamHome || 'Хозяева'} — ${match.team_away || match.teamAway || 'Гости'}`;
+                const teamNames = resolveMatchTeamNames(match);
+                const matchTitle = buildVkStreamTitle({
+                  tournamentName,
+                  broadcastTitle: match.broadcast_title,
+                  teamHome: teamNames.home,
+                  teamAway: teamNames.away,
+                  isStandalone: !!isStandalone,
+                });
                 const vkStart = await startVkLiveBroadcast({
                   groupId: settings.vk.communityId,
                   name: matchTitle.slice(0, 128),
@@ -1693,9 +1789,8 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
           sendUpdate({ period: 2 }, 'end_h1');
       }
       else if (action === 'start_h2') {
-          // Для 2-го тайма: 'up' продолжает с текущего, 'down' сбрасывается на длительность тайма
           const direction = sportType === 'futsal' ? 'down' : 'up';
-          const startBase = sportType === 'futsal' ? halfDuration * 60 : timerBase;
+          const startBase = halfDuration * 60;
           const now = Date.now();
           setTimerBase(startBase);
           setTimerUpdatedAt(now);
@@ -2053,6 +2148,17 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
         {isStreaming && streamHealth ? (
             <Text style={styles.streamHealthText}>{streamHealth}</Text>
         ) : null}
+        {!isStreaming && vkFinishPending ? (
+            <TouchableOpacity
+              style={styles.vkFinishBanner}
+              onPress={() => { void handleRetryFinishVk(); }}
+              disabled={vkFinishLoading}
+            >
+              <Text style={styles.vkFinishBannerText}>
+                {vkFinishLoading ? 'Завершение в VK…' : 'Трансляция в VK ещё активна — ЗАВЕРШИТЬ В VK'}
+              </Text>
+            </TouchableOpacity>
+        ) : null}
         {isStreaming && vkShareUrl ? (
             <TouchableOpacity
               style={styles.waafLinkRow}
@@ -2083,7 +2189,12 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       <View style={styles.header}>
             <TouchableOpacity onPress={() => { if (isStreaming) void stopStreamAndFinishVk(); onBack(); }} style={styles.backButton}><Text style={styles.backText}>{isStandaloneSession || isFreeTier ? 'ВЫХОД' : 'К РАСПИСАНИЮ'}</Text></TouchableOpacity>
             <TouchableOpacity onPress={handleUndo} style={styles.undoButton}><Text style={styles.undoText}>↩ ОТМЕНА</Text></TouchableOpacity>
-            <View style={styles.timerBox}><Text style={styles.timerText}>{formatTimer(displaySeconds)}</Text><Text style={styles.periodText}>{period === 0 ? 'Разминка' : period === 1 ? '1-й Тайм' : period === 2 ? 'Перерыв' : period === 3 ? '2-й Тайм' : period === 4 ? 'Перерыв (ДВ)' : period === 5 ? 'Доп. время 1' : period === 6 ? 'Доп. время 2' : period === 7 ? '⚽ Пенальти' : 'Завершён'}</Text></View>
+            <View style={styles.timerBox}>
+              <Text style={[styles.timerText, pastRegulationHalf && styles.timerTextAdded]}>
+                {formatTimer(displaySeconds)}
+              </Text>
+              <Text style={styles.periodText}>{period === 0 ? 'Разминка' : period === 1 ? '1-й Тайм' : period === 2 ? 'Перерыв' : period === 3 ? '2-й Тайм' : period === 4 ? 'Перерыв (ДВ)' : period === 5 ? 'Доп. время 1' : period === 6 ? 'Доп. время 2' : period === 7 ? '⚽ Пенальти' : 'Завершён'}</Text>
+            </View>
             <View style={styles.headerInfo}><Text style={styles.matchTitle}>{match.team_home} vs {match.team_away}</Text></View>
         </View>
 
@@ -2394,8 +2505,21 @@ const styles = StyleSheet.create({
   waafLinkRow: { alignSelf: 'center', marginTop: 4, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(26,67,132,0.85)', borderRadius: 8 },
   waafLinkText: { color: '#a8d4ff', fontSize: 12, fontWeight: '600' },
   streamHealthText: { alignSelf: 'center', marginTop: 4, color: '#8f8', fontSize: 11, fontWeight: '600' },
+  vkFinishBanner: {
+    alignSelf: 'center',
+    marginTop: 6,
+    marginBottom: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(227, 30, 36, 0.92)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#fff',
+  },
+  vkFinishBannerText: { color: '#fff', fontSize: 12, fontWeight: '800', textAlign: 'center' },
   timerBox: { alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 25, paddingVertical: 5, borderRadius: 12, borderWidth: 1, borderColor: '#e31e24' },
   timerText: { color: 'white', fontSize: 28, fontWeight: '900', fontVariant: ['tabular-nums'] },
+  timerTextAdded: { color: '#ffb347' },
   periodText: { color: '#e31e24', fontSize: 10, fontWeight: 'bold', textTransform: 'uppercase' },
   scoreboard: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 40 },
   teamControl: { alignItems: 'center' },

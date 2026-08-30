@@ -38,6 +38,8 @@ const emptySlot = (): TeamSlot => ({
   loading: false,
 });
 
+const HALF_DURATION_OPTIONS = [20, 25, 30, 35, 40, 45] as const;
+
 type Props = {
   onStart: (ctx: StandaloneMatchContext) => void | Promise<void>;
   onBack: () => void;
@@ -190,6 +192,9 @@ export function StandaloneMatchSetupScreen({ onStart, onBack, onOpenSettings, st
   const [away, setAway] = useState<TeamSlot>(emptySlot);
   const [rtmpUrl, setRtmpUrl] = useState('');
   const [streamKey, setStreamKey] = useState('');
+  const [broadcastTitle, setBroadcastTitle] = useState('');
+  const [sportType, setSportType] = useState<'football' | 'futsal'>('football');
+  const [halfDuration, setHalfDuration] = useState<number>(45);
   const [submitting, setSubmitting] = useState(false);
   const isFreeTier = standaloneTier === 'free';
 
@@ -221,6 +226,9 @@ export function StandaloneMatchSetupScreen({ onStart, onBack, onOpenSettings, st
         teamAway: awayName,
         awayClubId: away.selected?.id,
         awayLogoUri: teamLogo(away) || undefined,
+        broadcastTitle: broadcastTitle.trim() || undefined,
+        sportType,
+        halfDuration,
       };
       if (isFreeTier && rtmpUrl.trim() && streamKey.trim()) {
         await onStart({
@@ -300,6 +308,52 @@ export function StandaloneMatchSetupScreen({ onStart, onBack, onOpenSettings, st
             <Text style={[styles.previewTeam, { textAlign: 'right' }]} numberOfLines={2}>
               {preview.awayName}
             </Text>
+          </View>
+        </View>
+
+        <View style={styles.rtmpBlock}>
+          <Text style={styles.rtmpTitle}>Трансляция и тайм</Text>
+          <Text style={styles.rtmpHint}>
+            Название увидят зрители в VK: «{broadcastTitle.trim() || '…'}, {homeName || 'Команда 1'} — {awayName || 'Команда 2'}»
+          </Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Название трансляции (например: Товарищеская, поле 2)"
+            placeholderTextColor="#666"
+            value={broadcastTitle}
+            onChangeText={setBroadcastTitle}
+          />
+          <Text style={styles.fieldLabel}>Дисциплина</Text>
+          <View style={styles.chipRow}>
+            {(['football', 'futsal'] as const).map((s) => {
+              const active = sportType === s;
+              return (
+                <TouchableOpacity
+                  key={s}
+                  style={[styles.chip, active && styles.chipActive]}
+                  onPress={() => setSportType(s)}
+                >
+                  <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                    {s === 'football' ? 'Футбол' : 'Футзал'}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          <Text style={styles.fieldLabel}>Длительность тайма (мин)</Text>
+          <View style={styles.chipRow}>
+            {HALF_DURATION_OPTIONS.map((m) => {
+              const active = halfDuration === m;
+              return (
+                <TouchableOpacity
+                  key={m}
+                  style={[styles.chip, active && styles.chipActive]}
+                  onPress={() => setHalfDuration(m)}
+                >
+                  <Text style={[styles.chipText, active && styles.chipTextActive]}>{m}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
 
@@ -414,6 +468,19 @@ const styles = StyleSheet.create({
   },
   rtmpTitle: { color: '#fff', fontWeight: '900', fontSize: 12, marginBottom: 6, textTransform: 'uppercase' },
   rtmpHint: { color: '#888', fontSize: 12, marginBottom: 10, lineHeight: 17 },
+  fieldLabel: { color: '#aaa', fontSize: 11, fontWeight: '700', marginBottom: 6, marginTop: 4 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#555',
+    backgroundColor: '#222',
+  },
+  chipActive: { backgroundColor: '#1a4384', borderColor: '#4a90e2' },
+  chipText: { color: '#ccc', fontWeight: 'bold', fontSize: 12 },
+  chipTextActive: { color: '#fff' },
   previewCard: {
     flexDirection: 'row',
     alignItems: 'center',
