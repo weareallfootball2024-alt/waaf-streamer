@@ -10,6 +10,7 @@ export type ScoreboardPayload = {
   logoHome?: string | null;
   logoAway?: string | null;
   opacity?: number;
+  title?: string;
 };
 
 export type EventBannerPayload = {

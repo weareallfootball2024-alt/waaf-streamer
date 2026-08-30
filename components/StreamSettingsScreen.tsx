@@ -392,6 +392,7 @@ export function StreamSettingsScreen({ onClose }: Props) {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['videos'],
       quality: 1,
+      copyToCacheDirectory: true,
     });
     if (result.canceled || !result.assets?.[0]?.uri) return;
     try {
@@ -402,8 +403,8 @@ export function StreamSettingsScreen({ onClose }: Props) {
         ...prev,
         adClips: trimAdClips([...prev.adClips, { id, title, uri }]),
       }));
-    } catch {
-      Alert.alert('Ошибка', 'Не удалось сохранить ролик');
+    } catch (e) {
+      Alert.alert('Ошибка', e instanceof Error ? e.message : 'Не удалось сохранить ролик');
     }
   };
 

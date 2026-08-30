@@ -81,6 +81,7 @@ export async function pickVideoFromLibrary(): Promise<string | null> {
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['videos'],
     quality: 1,
+    copyToCacheDirectory: true,
   });
   if (result.canceled || !result.assets?.[0]?.uri) return null;
   return result.assets[0].uri;

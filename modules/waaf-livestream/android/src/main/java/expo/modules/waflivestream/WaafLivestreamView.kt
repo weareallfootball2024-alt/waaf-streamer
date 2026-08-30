@@ -103,6 +103,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   private var scoreAway = 0
   private var timerText = "00:00"
   private var periodText = ""
+  private var broadcastTitle = ""
   private val mainHandler = Handler(Looper.getMainLooper())
   private var zoomAnimRunnable: Runnable? = null
   private var pendingEndpoint: String? = null
@@ -333,12 +334,12 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
   private fun hideGlFiltersForInsert() {
     hideEventBanner()
     hideReplayIntro()
+    // Do not clearFilters() while RTMP is live — that tears down the GL encoder
+    // pipeline. Preview would still show the clip, but VK would keep the camera.
     try {
-      genericStream.getGlInterface().clearFilters()
+      scoreboardFilter?.setScale(0f, 0f)
     } catch (_: Exception) {
     }
-    scoreboardFilter = null
-    scoreboardReady = false
   }
 
   fun playVideoInsert(filePath: String, loop: Boolean) {
@@ -575,6 +576,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
       scoreboardLayout,
       encoderQuality.width,
       scoreboardOpacity,
+      broadcastTitle,
     )
   }
 
@@ -867,6 +869,7 @@ class WaafLivestreamView(context: Context, appContext: AppContext) : ExpoView(co
     payload["scoreAway"]?.let { scoreAway = (it as? Number)?.toInt() ?: scoreAway }
     payload["timer"]?.toString()?.let { timerText = it }
     payload["period"]?.toString()?.let { periodText = it }
+    payload["title"]?.toString()?.let { broadcastTitle = it.trim() }
     payload["opacity"]?.let {
       val v = (it as? Number)?.toFloat() ?: scoreboardOpacity
       scoreboardOpacity = v.coerceIn(0.1f, 1f)

@@ -78,6 +78,11 @@ class VideoInjector(
         }
 
         genericStream.changeVideoSource(videoSource)
+        try {
+          genericStream.requestKeyframe()
+        } catch (e: Exception) {
+          Log.w(TAG, "requestKeyframe after insert failed", e)
+        }
         isActive = true
         Log.i(TAG, "video insert started kind=$kind loop=$loop path=${uri.lastPathSegment}")
         callbacks.onInsertStarted(kind, loop)

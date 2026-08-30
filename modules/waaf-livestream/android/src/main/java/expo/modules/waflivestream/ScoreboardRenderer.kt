@@ -16,6 +16,7 @@ import kotlin.math.roundToInt
 object ScoreboardRenderer {
   private const val DESIGN_WIDTH = 1280
   private const val DESIGN_HEIGHT = 132
+  private const val TITLE_BAND = 40
   private const val LOGO_SIZE = 44f
   private const val LOGO_SIZE_COMPACT = 30f
   private const val LOGO_PAD = 8f
@@ -41,16 +42,17 @@ object ScoreboardRenderer {
     layout: ScoreboardLayout = ScoreboardLayout.FULL,
     streamWidth: Int = DESIGN_WIDTH,
     opacity: Float = 1f,
+    title: String = "",
   ): Bitmap {
     val bitmap = if (layout.isCompact) {
       renderCompact(
         teamHome, teamAway, scoreHome, scoreAway, timer, period,
-        logoHome, logoAway, layout, streamWidth,
+        logoHome, logoAway, layout, streamWidth, title,
       )
     } else {
       renderFullBar(
         teamHome, teamAway, scoreHome, scoreAway, timer, period,
-        logoHome, logoAway, streamWidth,
+        logoHome, logoAway, streamWidth, title,
       )
     }
     return applyOpacity(bitmap, opacity)
@@ -79,9 +81,12 @@ object ScoreboardRenderer {
     logoHome: Bitmap?,
     logoAway: Bitmap?,
     streamWidth: Int,
+    title: String,
   ): Bitmap {
     val width = streamWidth.coerceAtLeast(320)
-    val height = (width * DESIGN_HEIGHT / DESIGN_WIDTH.toFloat()).toInt().coerceAtLeast(52)
+    val titleText = title.trim()
+    val titleBand = if (titleText.isEmpty()) 0f else TITLE_BAND * (width / DESIGN_WIDTH.toFloat())
+    val height = ((width * DESIGN_HEIGHT / DESIGN_WIDTH.toFloat()) + titleBand).toInt().coerceAtLeast(52)
     val scale = width / DESIGN_WIDTH.toFloat()
 
     val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -95,9 +100,10 @@ object ScoreboardRenderer {
     val timerLabel = timer.ifBlank { "00:00" }
 
     paint.color = Color.argb(110, 0, 0, 0)
-    canvas.drawRoundRect(RectF(6f * scale, 8f * scale, width - 6f * scale, height - 4f * scale), 6f * scale, 6f * scale, paint)
+    val barTop = 6f * scale + titleBand
+    canvas.drawRoundRect(RectF(6f * scale, barTop + 2f * scale, width - 6f * scale, height - 4f * scale), 6f * scale, 6f * scale, paint)
 
-    val bar = RectF(6f * scale, 6f * scale, width - 6f * scale, height - 6f * scale)
+    val bar = RectF(6f * scale, barTop, width - 6f * scale, height - 6f * scale)
     paint.shader = LinearGradient(
       bar.left, bar.top, bar.left, bar.bottom,
       intArrayOf(navyDark, navyMid, navyLight),
@@ -106,6 +112,10 @@ object ScoreboardRenderer {
     )
     canvas.drawRect(bar, paint)
     paint.shader = null
+
+    if (titleText.isNotEmpty()) {
+      drawBroadcastTitle(canvas, titleText, width, titleBand, scale)
+    }
 
     paint.color = gold
     canvas.drawRect(bar.left, bar.top, bar.right, bar.top + 3f * scale, paint)
@@ -195,9 +205,12 @@ object ScoreboardRenderer {
     logoAway: Bitmap?,
     layout: ScoreboardLayout,
     streamWidth: Int,
+    title: String,
   ): Bitmap {
+    val titleText = title.trim()
     val width = (streamWidth * 0.48f).toInt().coerceIn(260, streamWidth)
-    val height = (width * 0.15f).toInt().coerceAtLeast(48)
+    val titleBand = if (titleText.isEmpty()) 0 else 22
+    val height = (width * 0.15f).toInt().coerceAtLeast(48) + titleBand
     val timerLabel = timer.ifBlank { "00:00" }
     val periodLabel = period.trim().ifBlank { "МАТЧ" }.uppercase()
 
@@ -208,7 +221,7 @@ object ScoreboardRenderer {
     val home = trimTeam(teamHome, if (logoHome != null) 10 else 14)
     val away = trimTeam(teamAway, if (logoAway != null) 10 else 14)
 
-    val bar = RectF(3f, 3f, width - 3f, height - 3f)
+    val bar = RectF(3f, 3f + titleBand, width - 3f, height - 3f)
     paint.shader = LinearGradient(
       bar.left, bar.top, bar.left, bar.bottom,
       intArrayOf(navyDark, navyMid),
@@ -217,6 +230,10 @@ object ScoreboardRenderer {
     )
     canvas.drawRoundRect(bar, 6f, 6f, paint)
     paint.shader = null
+
+    if (titleText.isNotEmpty()) {
+      drawBroadcastTitle(canvas, titleText, width, titleBand.toFloat(), 1f)
+    }
 
     paint.color = gold
     canvas.drawRect(bar.left, bar.top, bar.right, bar.top + 2f, paint)
@@ -264,6 +281,36 @@ object ScoreboardRenderer {
     canvas.drawText(periodLabel, periodX, bar.top + 12f, periodPaint)
 
     return bitmap
+  }
+
+  private fun drawBroadcastTitle(
+    canvas: Canvas,
+    title: String,
+    width: Int,
+    bandHeight: Float,
+    scale: Float,
+  ) {
+    val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = white
+      textSize = 20f * scale
+      typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+      setShadowLayer(4f * scale, 0f, 1f * scale, Color.argb(200, 0, 0, 0))
+    }
+    var text = title
+    val maxW = width - 24f * scale
+    while (titlePaint.measureText(text) > maxW && titlePaint.textSize > 11f * scale) {
+      titlePaint.textSize -= 1f * scale
+    }
+    if (titlePaint.measureText(text) > maxW && text.length > 8) {
+      while (titlePaint.measureText("$text…") > maxW && text.length > 8) {
+        text = text.dropLast(1)
+      }
+      text = "$text…"
+    }
+    val textW = titlePaint.measureText(text)
+    val fm = titlePaint.fontMetrics
+    val y = bandHeight / 2f - (fm.ascent + fm.descent) / 2f
+    canvas.drawText(text, (width - textW) / 2f, y, titlePaint)
   }
 
   private fun drawTeamPill(

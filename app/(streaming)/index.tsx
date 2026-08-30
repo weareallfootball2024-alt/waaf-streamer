@@ -70,6 +70,7 @@ import {
   type StandaloneTier,
 } from '../../services/standaloneMatch';
 import { buildRtmpEndpoint, maskRtmpEndpoint, normalizeRtmpFields, validateRtmpSettings } from '../../services/rtmpEndpoint';
+import { copyAdClipToStorage } from '../../services/adClips';
 import { formatTimer, getActualSeconds } from '../../utils/matchTimer';
 import * as Linking from 'expo-linking';
 import {
@@ -1184,6 +1185,13 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       logoHome: resolveLogoUri(match.logo_home) || undefined,
       logoAway: resolveLogoUri(match.logo_away) || undefined,
       opacity: scoreboardOpacity,
+      title: buildVkStreamTitle({
+        tournamentName,
+        broadcastTitle: match.broadcast_title,
+        teamHome: teams.home,
+        teamAway: teams.away,
+        isStandalone: !!isStandalone,
+      }),
     }).catch(() => {});
   };
 
@@ -1220,6 +1228,9 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     displaySeconds,
     period,
     isStreaming,
+    tournamentName,
+    match.broadcast_title,
+    isStandalone,
   ]);
 
   // Получает актуальное время для записи в событие (то, что видит зритель)
@@ -1649,7 +1660,8 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
 
   const handlePlayVideoInsert = async (uri: string, loop: boolean) => {
     try {
-      await videoRef.current?.playVideoInsert(uri, loop);
+      const localUri = await copyAdClipToStorage(uri, `play_${Date.now()}`);
+      await videoRef.current?.playVideoInsert(localUri, loop);
     } catch (e: unknown) {
       Alert.alert('Ролик', e instanceof Error ? e.message : 'Не удалось вставить ролик');
     }
