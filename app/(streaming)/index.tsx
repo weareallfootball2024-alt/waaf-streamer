@@ -1532,8 +1532,8 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
 
             if (!rtmpUrl || !streamKey) {
               const hint =
-                settings.activePlatform === 'vk' && settings.vk.communityId
-                  ? `${getStreamSetupHint(settings)}\n\nВставьте RTMP и ключ (из VK Studio или StreamVi). Для авто-ключей войдите через VK.`
+                settings.activePlatform === 'vk'
+                  ? `${getStreamSetupHint(settings)}\n\nМожно просто вставить URL и ключ из VK Studio. Сообщество — по желанию: если вы админ и выберете его, эфир пойдёт туда.`
                   : getStreamSetupHint(settings);
               Alert.alert(
                 'Настройте трансляцию',
@@ -1549,7 +1549,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             const normalized = normalizeRtmpFields(rtmpUrl, streamKey);
             const rtmpError = validateRtmpSettings(normalized.rtmpUrl, normalized.streamKey);
             if (rtmpError) {
-              Alert.alert('VK RTMP', `${rtmpError}\n\nURL: rtmp://…/input/ или rtmps://pub.live.vkvideo.ru/app/\nКлюч — отдельным полем из VK Studio.`);
+              Alert.alert('VK RTMP', `${rtmpError}\n\nНужен адрес вида rtmp://… или rtmps://… и ключ из VK Studio.`);
               return;
             }
             const endpoint = buildRtmpEndpoint(normalized.rtmpUrl, normalized.streamKey);
@@ -1633,11 +1633,11 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       'Эфир запущен',
       pendingVkApiStreamRef.current
         ? settings.vk.streamTarget === 'playlist'
-          ? `RTMP подключён, пост на стене создан.${vkShareUrl ? `\n\nСсылка: ${vkShareUrl}` : ''}\n\nСТОП завершит эфир в VK.`
-          : `RTMP подключён.${vkShareUrl ? `\n\nСсылка: ${vkShareUrl}` : ''}\n\nСТОП завершит эфир в VK.`
+          ? `Эфир идёт, пост на стене создан.${vkShareUrl ? `\n\nСсылка: ${vkShareUrl}` : ''}\n\nСТОП завершит трансляцию в VK.`
+          : `Эфир идёт.${vkShareUrl ? `\n\nСсылка: ${vkShareUrl}` : ''}\n\nСТОП завершит трансляцию в VK.`
         : groupId && (await getStoredVkToken())
-          ? `RTMP подключён (ваши ключи). СТОП завершит эфир в VK Studio — как StreamVi на сервере.${vkShareUrl ? `\n\nСсылка: ${vkShareUrl}` : ''}`
-          : `RTMP подключён.${vkShareUrl ? `\n\nСсылка: ${vkShareUrl}` : ''}\n\nДля авто-завершения в VK войдите через VK и выберите сообщество.`,
+          ? `Эфир идёт по вашим ключам.${vkShareUrl ? `\n\nСсылка: ${vkShareUrl}` : ''}\n\nСТОП попробует завершить трансляцию в VK Studio.`
+          : `Эфир идёт.${vkShareUrl ? `\n\nСсылка: ${vkShareUrl}` : ''}\n\nЧтобы СТОП сам завершал эфир в VK — войдите через VK и выберите сообщество, где вы админ.`,
     );
   };
 
@@ -2085,7 +2085,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                     streamSessionRef.current = null;
                   }
                   const hint = code === 'auth_error'
-                    ? 'Неверный RTMP URL или ключ. Скопируйте заново из VK Studio → Ключи и виджеты.'
+                    ? 'Неверный RTMP URL или ключ. Скопируйте заново из VK Studio → «Ключи и виджеты».'
                     : code === 'encoder_prepare_failed'
                     ? 'Камера не готова. Закройте другие приложения с камерой и нажмите «ЭФИР» снова.'
                     : lower.includes('broken pipe')

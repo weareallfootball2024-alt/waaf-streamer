@@ -108,22 +108,24 @@ export function getActiveRtmpConfig(
   if (!cfg?.enabled) return null;
 
   if (platform === 'vk') {
-    if (!settings.vk.communityId) return null;
-
+    // Режим «пост на стене»: ключи текущего эфира из сессии
     if (settings.vk.streamTarget === 'playlist') {
       const session = getPlaylistSessionRtmp();
-      if (!session) return null;
-      return { ...session, platform };
+      if (session) return { ...session, platform };
     }
 
-    if (!cfg.rtmpUrl?.trim() || !cfg.streamKey?.trim()) return null;
+    // Ручные URL + ключ — достаточно, сообщество не обязательно
+    if (cfg.rtmpUrl?.trim() && cfg.streamKey?.trim()) {
+      const url = cfg.rtmpUrl.trim();
+      return {
+        rtmpUrl: url.endsWith('/') ? url : `${url}/`,
+        streamKey: cfg.streamKey.trim(),
+        platform,
+      };
+    }
 
-    const url = cfg.rtmpUrl.trim();
-    return {
-      rtmpUrl: url.endsWith('/') ? url : `${url}/`,
-      streamKey: cfg.streamKey.trim(),
-      platform,
-    };
+    // Без ручных ключей старт возможен только через VK API (нужно сообщество) — конфиг пока пуст
+    return null;
   }
 
   if (!cfg.rtmpUrl?.trim() || !cfg.streamKey?.trim()) return null;
@@ -139,13 +141,16 @@ export function getStreamSetupHint(settings: StreamSettings): string {
   if (settings.activePlatform !== 'vk') {
     return 'Укажите платформу и RTMP URL + ключ в настройках';
   }
-  if (!settings.vk.communityId) {
-    return 'Войдите через VK и выберите сообщество в настройках трансляции';
-  }
   if (settings.vk.streamTarget === 'playlist') {
-    return 'Вставьте RTMP URL и ключ из VK Studio для этой трансляции (режим плейлист) и нажмите «Применить для эфира»';
+    return 'Вставьте RTMP URL и ключ из VK Studio для этой трансляции и нажмите «Применить для эфира». Сообщество выбирать необязательно.';
   }
-  return 'Скопируйте RTMP URL и ключ из VK Studio → Ключи и виджеты. Счёт вшивается в эфир на телефоне.';
+  if (settings.vk.rtmpUrl?.trim() && !settings.vk.streamKey?.trim()) {
+    return 'Укажите ключ трансляции из VK Studio (раздел «Ключи и виджеты»).';
+  }
+  if (!settings.vk.rtmpUrl?.trim() || !settings.vk.streamKey?.trim()) {
+    return 'Укажите RTMP URL и ключ из VK Studio. Сообщество выбирать необязательно — оно нужно, если хотите авто-создание эфира в группе, где вы админ.';
+  }
+  return 'Проверьте RTMP URL и ключ в настройках трансляции.';
 }
 
 export function getVkShareUrl(settings: StreamSettings): string | null {

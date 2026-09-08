@@ -40,15 +40,12 @@ import {
   clearVkToken,
   ensureStoredVkUserId,
   fetchAdminGroups,
-  fetchAndStoreVkCapabilities,
   fetchGroupAlbums,
-  getStoredVkCapabilities,
   getStoredVkToken,
   getStoredVkUserId,
   loginWithVk,
   resolveCommunity,
   VkAlbum,
-  VkCapabilities,
   VkGroup,
 } from '../services/vkAuth';
 import type { StaffUser } from '../utils/roles';
@@ -137,19 +134,7 @@ export function StreamSettingsScreen({ onClose }: Props) {
   const [waafPassword, setWaafPassword] = useState('');
   const [waafLoading, setWaafLoading] = useState(false);
   const [vkUserId, setVkUserId] = useState<string | null>(null);
-  const [vkCaps, setVkCaps] = useState<VkCapabilities | null>(null);
-  const [capsLoading, setCapsLoading] = useState(false);
   const [linkMode, setLinkMode] = useState(false);
-
-  const refreshVkCapabilities = async (groupId?: number) => {
-    setCapsLoading(true);
-    try {
-      const caps = await fetchAndStoreVkCapabilities(groupId);
-      setVkCaps(caps);
-    } finally {
-      setCapsLoading(false);
-    }
-  };
 
   const loadAlbums = async (groupId: number) => {
     setAlbumsLoading(true);
@@ -157,7 +142,7 @@ export function StreamSettingsScreen({ onClose }: Props) {
     try {
       setAlbums(await fetchGroupAlbums(groupId));
     } catch {
-      /* плейлисты опциональны — video scope может быть недоступен */
+      /* плейлисты опциональны */
     } finally {
       setAlbumsLoading(false);
     }
@@ -187,7 +172,7 @@ export function StreamSettingsScreen({ onClose }: Props) {
           setGroups(list);
           if (list.length === 0) {
             setGroupsError(
-              'Список пуст. Укажите сообщество вручную ниже или дождитесь одобрения scope groups от VK.',
+              'Список пуст. Укажите сообщество вручную ниже (по ссылке или ID).',
             );
           }
         } catch (e: unknown) {
@@ -196,11 +181,6 @@ export function StreamSettingsScreen({ onClose }: Props) {
         }
         if (saved.vk.communityId && saved.vk.streamTarget === 'playlist') {
           await loadAlbums(saved.vk.communityId);
-        }
-        const cached = await getStoredVkCapabilities();
-        if (cached) setVkCaps(cached);
-        if (token) {
-          await refreshVkCapabilities(saved.vk.communityId);
         }
       }
       setLoading(false);
@@ -246,7 +226,7 @@ export function StreamSettingsScreen({ onClose }: Props) {
         setGroups(list);
         if (list.length === 0) {
           setGroupsError(
-            'Список пуст. Укажите сообщество вручную ниже или дождитесь одобрения scope groups от VK.',
+            'Список пуст. Укажите сообщество вручную ниже (по ссылке или ID).',
           );
         }
       } catch (e: unknown) {
@@ -254,7 +234,6 @@ export function StreamSettingsScreen({ onClose }: Props) {
         setGroups([]);
         setGroupsError(formatGroupsError(msg));
       }
-      await refreshVkCapabilities(settings.vk.communityId);
     } catch (e: unknown) {
       Alert.alert('VK', e instanceof Error ? e.message : 'Ошибка входа');
     } finally {
@@ -341,7 +320,6 @@ export function StreamSettingsScreen({ onClose }: Props) {
     if (settings.vk.streamTarget === 'playlist') {
       loadAlbums(group.id);
     }
-    void refreshVkCapabilities(group.id);
   };
 
   const handleApplyCommunity = async () => {
@@ -660,49 +638,28 @@ export function StreamSettingsScreen({ onClose }: Props) {
                   )}
                 </TouchableOpacity>
                 <Text style={[styles.hint, { marginTop: 10 }]}>
-                  Откроется браузер. После входа нажмите «Открыть WAAF Streamer». Если цикл «войти через
-                  приложение» — откройте мывсефутбол.рф в Chrome, войдите в VK и повторите.
+                  Вход через VK необязателен, если вы уже вставили URL и ключ из Studio ниже.
+                  Если войдёте и выберете сообщество, где вы админ — эфир пойдёт туда, а СТОП
+                  сможет завершить трансляцию в VK.
                 </Text>
               </>
             ) : (
               <>
                 <View style={styles.vkRow}>
-                  <Text style={styles.hint}>Выберите сообщество, где вы администратор:</Text>
+                  <Text style={[styles.hint, { flex: 1, marginRight: 8 }]}>
+                    Сообщества, где вы администратор (необязательно):
+                  </Text>
                   <TouchableOpacity onPress={handleVkLogout}>
                     <Text style={styles.linkOut}>Выйти</Text>
                   </TouchableOpacity>
                 </View>
-                {vkLoggedIn && (
-                  <View style={styles.scopeBox}>
-                    <Text style={styles.scopeTitle}>Статус VK API (app 54534524)</Text>
-                    {capsLoading ? (
-                      <ActivityIndicator color="#888" style={{ marginVertical: 6 }} />
-                    ) : (
-                      <>
-                        <Text style={[styles.scopeLine, vkCaps?.groups ? styles.scopeOk : styles.scopePending]}>
-                          {vkCaps?.groups ? '✓' : '○'} Сообщества (groups) —{' '}
-                          {vkCaps?.groups ? 'работает' : 'ожидаем одобрение VK'}
-                        </Text>
-                        <Text style={[styles.scopeLine, vkCaps?.video ? styles.scopeOk : styles.scopePending]}>
-                          {vkCaps?.video ? '✓' : '○'} Завершение эфира (video) —{' '}
-                          {vkCaps?.video ? 'работает' : 'ожидаем одобрение VK'}
-                        </Text>
-                        {!vkCaps?.video && (
-                          <Text style={styles.scopeHint}>
-                            Пока scope video не одобрен, СТОП только отключает RTMP. Завершите трансляцию в VK Studio
-                            вручную. Запрос отправлен в devsupport@corp.vk.com — после одобрения перелогиньтесь через VK.
-                          </Text>
-                        )}
-                      </>
-                    )}
-                    <TouchableOpacity onPress={() => refreshVkCapabilities(vk.communityId)} disabled={capsLoading}>
-                      <Text style={styles.linkOut}>Обновить проверку</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
+                <Text style={[styles.hint, { marginBottom: 8 }]}>
+                  Если выберете сообщество — эфир пойдёт туда. Без выбора достаточно URL и ключа из
+                  VK Studio: трансляция уйдёт по этим ключам.
+                </Text>
                 {groupsError && <Text style={styles.errorText}>{groupsError}</Text>}
                 {groups.length === 0 && !groupsError && (
-                  <Text style={styles.empty}>Нет сообществ с правами администратора</Text>
+                  <Text style={styles.empty}>Нет сообществ с правами администратора — можно указать вручную ниже или просто ввести URL и ключ</Text>
                 )}
                 {groups.map((g) => {
                   const selected = vk.communityId === g.id;
@@ -722,7 +679,7 @@ export function StreamSettingsScreen({ onClose }: Props) {
                   );
                 })}
                 <Text style={[styles.hint, { marginTop: 12 }]}>
-                  Или укажите сообщество вручную (club123, waafootball или ссылка vk.com/waafootball):
+                  Или укажите сообщество вручную (club123, название или ссылка vk.com/…):
                 </Text>
                 <TextInput
                   style={styles.input}
@@ -757,112 +714,108 @@ export function StreamSettingsScreen({ onClose }: Props) {
               </>
             )}
 
-            {hasCommunity && (
+            <Text style={[styles.blockTitle, { marginTop: 16 }]}>RTMP и ключ</Text>
+            <Text style={[styles.hint, { marginBottom: 8 }]}>
+              Укажите URL сервера и ключ из VK Studio → «Ключи и виджеты». Этого достаточно для эфира.
+              {hasCommunity
+                ? ' Сообщество выбрано — при старте ключи могут подставиться сами, а СТОП завершит эфир в VK.'
+                : ' Сообщество можно не выбирать: тогда эфир идёт по вашим ключам туда, куда они выписаны в Studio.'}
+            </Text>
+
+            <Text style={[styles.blockTitle, { marginTop: 8 }]}>Куда в VK</Text>
+            <View style={styles.platformRow}>
+              <TouchableOpacity
+                style={[styles.platformChip, vk.streamTarget === 'wall' && styles.platformChipActive]}
+                onPress={() => setStreamTarget('wall')}
+              >
+                <Text style={[styles.platformChipText, vk.streamTarget === 'wall' && styles.platformChipTextActive]}>
+                  Раздел «Видео»
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.platformChip, vk.streamTarget === 'playlist' && styles.platformChipActive]}
+                onPress={() => setStreamTarget('playlist')}
+              >
+                <Text style={[styles.platformChipText, vk.streamTarget === 'playlist' && styles.platformChipTextActive]}>
+                  Пост на стене
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={[styles.hint, { marginBottom: 10 }]}>
+              {vk.streamTarget === 'playlist'
+                ? 'Пост на стене: удобнее с выбранным сообществом (где вы админ). Если ключи пустые — при старте эфира их выдаст VK. Или вставьте свои из Studio.'
+                : 'Постоянный ключ из VK Studio → раздел «Видео». На стену сообщества такой эфир сам не публикуется.'}
+            </Text>
+
+            {vk.streamTarget === 'wall' && (
               <>
-                <Text style={[styles.blockTitle, { marginTop: 16 }]}>RTMP и ключ</Text>
-                <Text style={[styles.hint, { marginBottom: 8 }]}>
-                  Как в SportCam / StreamVi: вставьте URL и ключ (из VK Studio или из StreamVi → «Настройки» → сервер и ключ).
-                  {vkLoggedIn
-                    ? ' Сообщество привязано — СТОП завершит эфир в VK через API (как StreamVi на сервере).'
-                    : ' Войдите через VK и выберите сообщество — тогда СТОП завершит эфир в Studio без ручных действий.'}
+                <Text style={styles.hint}>
+                  Скопируйте из VK Studio поля сервера (URL) и ключа трансляции.
                 </Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="RTMP URL сервера"
+                  placeholderTextColor="#666"
+                  value={vk.rtmpUrl}
+                  onChangeText={(t) => updatePlatform('vk', { rtmpUrl: t })}
+                  autoCapitalize="none"
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Ключ трансляции"
+                  placeholderTextColor="#666"
+                  value={vk.streamKey}
+                  onChangeText={(t) => updatePlatform('vk', { streamKey: t })}
+                  autoCapitalize="none"
+                  secureTextEntry
+                />
+              </>
+            )}
 
-                <Text style={[styles.blockTitle, { marginTop: 8 }]}>Куда в VK</Text>
-                <View style={styles.platformRow}>
-                  <TouchableOpacity
-                    style={[styles.platformChip, vk.streamTarget === 'wall' && styles.platformChipActive]}
-                    onPress={() => setStreamTarget('wall')}
-                  >
-                    <Text style={[styles.platformChipText, vk.streamTarget === 'wall' && styles.platformChipTextActive]}>
-                      Раздел «Видео»
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.platformChip, vk.streamTarget === 'playlist' && styles.platformChipActive]}
-                    onPress={() => setStreamTarget('playlist')}
-                  >
-                    <Text style={[styles.platformChipText, vk.streamTarget === 'playlist' && styles.platformChipTextActive]}>
-                      Пост на стене
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-
-                <Text style={[styles.hint, { marginBottom: 10 }]}>
-                  {vk.streamTarget === 'playlist'
-                    ? 'Пост на стене: привяжите сообщество через VK. Если RTMP не задан — ключи выдаст VK API при ЭФИР.'
-                    : 'Постоянный ключ VK Studio → раздел «Видео». На стену не попадает (ограничение VK).'}
+            {vk.streamTarget === 'playlist' && (
+              <>
+                <Text style={styles.hint}>
+                  Для поста на стене: войдите через VK и выберите сообщество — или вставьте URL и ключ вручную.
                 </Text>
-
-                {vk.streamTarget === 'wall' && (
+                {albumsLoading && <ActivityIndicator color="#888" style={{ marginBottom: 8 }} />}
+                {albums.length > 0 && (
                   <>
-                    <Text style={styles.hint}>
-                      VK Studio → Ключи и виджеты (или ключи StreamVi, если рестримите через них).
-                    </Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="RTMP URL сервера"
-                      placeholderTextColor="#666"
-                      value={vk.rtmpUrl}
-                      onChangeText={(t) => updatePlatform('vk', { rtmpUrl: t })}
-                      autoCapitalize="none"
-                    />
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Ключ трансляции (stream key)"
-                      placeholderTextColor="#666"
-                      value={vk.streamKey}
-                      onChangeText={(t) => updatePlatform('vk', { streamKey: t })}
-                      autoCapitalize="none"
-                      secureTextEntry
-                    />
+                    <Text style={styles.hint}>Плейлисты видео (справочно):</Text>
+                    {albums.map((a) => {
+                      const selected = vk.albumId === a.id;
+                      return (
+                        <TouchableOpacity
+                          key={a.id}
+                          style={[styles.groupRow, selected && styles.groupRowSelected]}
+                          onPress={() => updatePlatform('vk', { albumId: a.id, albumTitle: a.title })}
+                        >
+                          <Text style={styles.groupName}>{a.title}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
                   </>
                 )}
-
-                {vk.streamTarget === 'playlist' && (
-                  <>
-                    <Text style={styles.hint}>
-                      Для стены: войдите через VK, выберите сообщество. RTMP можно не вводить — выдастся при ЭФИР. Или вставьте ключ из Studio / StreamVi.
-                    </Text>
-                    {albumsLoading && <ActivityIndicator color="#888" style={{ marginBottom: 8 }} />}
-                    {albums.length > 0 && (
-                      <>
-                        <Text style={styles.hint}>Плейлисты видео (справочно):</Text>
-                        {albums.map((a) => {
-                          const selected = vk.albumId === a.id;
-                          return (
-                            <TouchableOpacity
-                              key={a.id}
-                              style={[styles.groupRow, selected && styles.groupRowSelected]}
-                              onPress={() => updatePlatform('vk', { albumId: a.id, albumTitle: a.title })}
-                            >
-                              <Text style={styles.groupName}>{a.title}</Text>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </>
-                    )}
-                    <TextInput
-                      style={styles.input}
-                      placeholder="RTMP URL для этой трансляции"
-                      placeholderTextColor="#666"
-                      value={playlistRtmpUrl}
-                      onChangeText={setPlaylistRtmpUrl}
-                      autoCapitalize="none"
-                    />
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Ключ этой трансляции"
-                      placeholderTextColor="#666"
-                      value={playlistStreamKey}
-                      onChangeText={setPlaylistStreamKey}
-                      autoCapitalize="none"
-                      secureTextEntry
-                    />
-                    <TouchableOpacity style={styles.btnApply} onPress={applyPlaylistRtmp}>
-                      <Text style={styles.btnApplyText}>ПРИМЕНИТЬ КЛЮЧИ ДЛЯ ЭФИРА</Text>
-                    </TouchableOpacity>
-                  </>
-                )}
+                <TextInput
+                  style={styles.input}
+                  placeholder="RTMP URL для этой трансляции"
+                  placeholderTextColor="#666"
+                  value={playlistRtmpUrl}
+                  onChangeText={setPlaylistRtmpUrl}
+                  autoCapitalize="none"
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Ключ этой трансляции"
+                  placeholderTextColor="#666"
+                  value={playlistStreamKey}
+                  onChangeText={setPlaylistStreamKey}
+                  autoCapitalize="none"
+                  secureTextEntry
+                />
+                <TouchableOpacity style={styles.btnApply} onPress={applyPlaylistRtmp}>
+                  <Text style={styles.btnApplyText}>ПРИМЕНИТЬ КЛЮЧИ ДЛЯ ЭФИРА</Text>
+                </TouchableOpacity>
               </>
             )}
           </View>
@@ -1012,19 +965,6 @@ const styles = StyleSheet.create({
   groupPhoto: { width: 36, height: 36, borderRadius: 18, marginRight: 10 },
   groupPhotoPlaceholder: { width: 36, height: 36, borderRadius: 18, marginRight: 10, backgroundColor: '#444' },
   groupName: { color: '#fff', fontSize: 14, flex: 1 },
-  scopeBox: {
-    backgroundColor: '#1e1e1e',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#333',
-  },
-  scopeTitle: { color: '#aaa', fontSize: 12, fontWeight: '700', marginBottom: 8 },
-  scopeLine: { fontSize: 13, marginBottom: 4 },
-  scopeOk: { color: '#4ade80' },
-  scopePending: { color: '#fbbf24' },
-  scopeHint: { color: '#888', fontSize: 11, lineHeight: 16, marginTop: 6, marginBottom: 4 },
   opacityBlock: {
     backgroundColor: '#1e1e1e',
     borderRadius: 10,

@@ -404,16 +404,16 @@ export function vkStreamErrorMessage(error?: string): string {
     case 'network_error':
       return 'Нет связи с сервером WAAF.';
     case 'vk_no_rtmp':
-      return 'VK не выдал RTMP. Нужен scope video у приложения 54534524 (devsupport@corp.vk.com).';
+      return 'VK не выдал ключ трансляции. Укажите URL и ключ из VK Studio вручную или завершите эфир в Studio.';
     case 'vk_stop_failed':
-      return 'VK API не завершил трансляцию. Завершите в Studio вручную.';
+      return 'Не удалось завершить эфир через VK. Остановите трансляцию вручную в VK Studio.';
     default:
       break;
   }
 
   const lower = raw.toLowerCase();
   if (lower.includes('активная трансляция') && lower.includes('не найдена')) {
-    return 'Эфир идёт, но VK API не видит объект трансляции (нет scope video или эфир ещё не зарегистрирован). Подождите 30 сек или завершите в Studio вручную.';
+    return 'Эфир идёт, но VK ещё не зарегистрировал трансляцию. Подождите полминуты или завершите её вручную в VK Studio.';
   }
   if (
     lower.includes('access denied') ||
@@ -423,7 +423,7 @@ export function vkStreamErrorMessage(error?: string): string {
     raw.includes('error_code":15') ||
     raw.includes('error_code":204')
   ) {
-    return 'VK не одобрил scope video для приложения 54534524. Завершите в Studio вручную. Запрос: devsupport@corp.vk.com';
+    return 'VK не дал завершить эфир автоматически. Остановите трансляцию вручную в VK Studio.';
   }
   return raw;
 }
