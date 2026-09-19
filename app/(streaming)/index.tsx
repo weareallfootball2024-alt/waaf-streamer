@@ -14,6 +14,7 @@ import {
     StyleSheet, Text,
     TextInput,
     TouchableOpacity,
+    useWindowDimensions,
     View
 } from 'react-native';
 
@@ -102,9 +103,11 @@ function resolveMatchTeamNames(match: {
   team_away?: string;
   teamHome?: string;
   teamAway?: string;
+  computed_home?: string;
+  computed_away?: string;
 }) {
-  const home = String(match.team_home ?? match.teamHome ?? '').trim();
-  const away = String(match.team_away ?? match.teamAway ?? '').trim();
+  const home = String(match.computed_home ?? match.team_home ?? match.teamHome ?? '').trim();
+  const away = String(match.computed_away ?? match.team_away ?? match.teamAway ?? '').trim();
   return {
     home: home || 'Хозяева',
     away: away || 'Гости',
@@ -275,19 +278,23 @@ function MatchSelectionScreen({ matches, onSelect, onBack, tokenMode = false }) 
             <FlatList 
                 data={matches}
                 keyExtractor={item => item.id.toString()}
-                renderItem={({item}) => (
+                renderItem={({item}) => {
+                    const names = resolveMatchTeamNames(item);
+                    const finished = item.status === 'finished' || Number(item.is_finished) === 1 || Number(item.current_period) === 8;
+                    return (
                     <TouchableOpacity style={styles.matchCard} onPress={() => onSelect(item)}>
                         <Text style={styles.matchTime}>{new Date(item.start_time).toLocaleTimeString().slice(0,5)}</Text>
                         <View style={styles.matchRow}>
-                            <Text style={styles.teamTitle}>{item.team_home}</Text>
+                            <Text style={styles.teamTitle}>{names.home}</Text>
                             <Text style={styles.vsText}>vs</Text>
-                            <Text style={styles.teamTitle}>{item.team_away}</Text>
+                            <Text style={styles.teamTitle}>{names.away}</Text>
                         </View>
-                        <Text style={[styles.matchStatus, {color: item.status === 'live' ? '#e31e24' : item.status === 'finished' ? 'gray' : '#4cd964'}]}>
-                            {item.status === 'live' ? '🔴 LIVE' : item.status === 'finished' ? '🏁 ЗАВЕРШЕН' : '🟢 ОЖИДАЕТСЯ'}
+                        <Text style={[styles.matchStatus, {color: item.status === 'live' ? '#e31e24' : finished ? 'gray' : '#4cd964'}]}>
+                            {item.status === 'live' ? '🔴 LIVE' : finished ? '🏁 ЗАВЕРШЕН' : '🟢 ОЖИДАЕТСЯ'}
                         </Text>
                     </TouchableOpacity>
-                )}
+                    );
+                }}
             />
         </SafeAreaView>
     );
@@ -920,6 +927,16 @@ function RosterEditScreen({ match, onSave, onBack, accessCode = null, sessionTok
 // ==================================================
 function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, sessionToken = null, operatorToken = null, tokenType = null, standaloneTier = null, isStandaloneSession = false }) {
   const insets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  // Landscape phones / small tablets: keep controls on-screen
+  const compactUi = windowHeight < 420 || windowWidth < 740;
+  const actionBtnSize = compactUi ? 64 : 90;
+  const actionLogoSize = compactUi ? 44 : 60;
+  const scoreFontSize = compactUi ? 44 : 70;
+  const timerFontSize = compactUi ? 22 : 28;
+  const primaryBtnPadV = compactUi ? 10 : 15;
+  const primaryBtnPadH = compactUi ? 18 : 30;
+  const primaryBtnFont = compactUi ? 14 : 16;
   const videoRef = useRef<WaafLivestreamViewRef>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const openStreamSettings = async () => {
@@ -1404,12 +1421,27 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
       if (updates.score_away !== undefined) setScore((s) => ({ ...s, away: updates.score_away }));
       if (!match.id) return;
 
+      const nextPeriod = updates.period !== undefined ? updates.period : period;
+      const matchFinished =
+        updates.status === 'finished'
+        || nextPeriod === 8
+        || period === 8
+        || match?.status === 'finished'
+        || Number(match?.is_finished) === 1;
+
       const currentSec = getCurrentDisplaySeconds();
+      let nextStatus = updates.status;
+      if (matchFinished) {
+        nextStatus = 'finished';
+      } else if (!nextStatus) {
+        nextStatus = isStreaming ? 'live' : 'expected';
+      }
+
       const payload: any = {
           score_home: updates.score_home !== undefined ? updates.score_home : score.home,
           score_away: updates.score_away !== undefined ? updates.score_away : score.away,
-          status: updates.status || (isStreaming ? 'live' : 'scheduled'), 
-          current_period: updates.period !== undefined ? updates.period : period,
+          status: nextStatus,
+          current_period: nextPeriod,
           timer_seconds: currentSec,
           is_paused: !isTimerRunning,
           event_type: eventType, 
@@ -1466,7 +1498,10 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
               );
             }
             sendStreamHeartbeat({ is_streaming: false, stream_disconnected: true });
-            sendUpdate({ status: 'scheduled' });
+            // Не откатываем завершённый матч в scheduled при стопе эфира
+            if (!(period === 8 || match?.status === 'finished' || Number(match?.is_finished) === 1)) {
+              sendUpdate({ status: 'expected' });
+            }
             await finishAutoQualitySession(false);
             Alert.alert('Эфир остановлен', vkStop.message || 'RTMP отключён.');
         } catch (e: any) {
@@ -2156,7 +2191,18 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             </View> 
           )}
       </View>
-      <SafeAreaView style={[styles.overlay, { paddingTop: Math.max(insets.top, 4), paddingLeft: Math.max(insets.left, 8), paddingRight: Math.max(insets.right, 8) }]} pointerEvents="box-none">
+      <SafeAreaView
+        style={[
+          styles.overlay,
+          {
+            paddingTop: Math.max(insets.top, 4),
+            paddingBottom: Math.max(insets.bottom, 8),
+            paddingLeft: Math.max(insets.left, 8),
+            paddingRight: Math.max(insets.right, 8),
+          },
+        ]}
+        pointerEvents="box-none"
+      >
         {isStreaming && streamHealth ? (
             <Text style={styles.streamHealthText}>{streamHealth}</Text>
         ) : null}
@@ -2194,93 +2240,98 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
             opacity={operatorUiOpacity}
             disabled={videoInsertActive || replayLoading}
             onSelect={handleZoomSelect}
+            compact={compactUi}
           />
         ) : null}
 
-        <View style={{ opacity: operatorUiOpacity }} pointerEvents="box-none">
+        <View style={[styles.matchUiColumn, { opacity: operatorUiOpacity }]} pointerEvents="box-none">
       <View style={styles.header}>
             <TouchableOpacity onPress={() => { if (isStreaming) void stopStreamAndFinishVk(); onBack(); }} style={styles.backButton}><Text style={styles.backText}>{isStandaloneSession || isFreeTier ? 'ВЫХОД' : 'К РАСПИСАНИЮ'}</Text></TouchableOpacity>
             <TouchableOpacity onPress={handleUndo} style={styles.undoButton}><Text style={styles.undoText}>↩ ОТМЕНА</Text></TouchableOpacity>
             <View style={styles.timerBox}>
-              <Text style={[styles.timerText, pastRegulationHalf && styles.timerTextAdded]}>
+              <Text style={[styles.timerText, { fontSize: timerFontSize }, pastRegulationHalf && styles.timerTextAdded]}>
                 {formatTimer(displaySeconds)}
               </Text>
               <Text style={styles.periodText}>{period === 0 ? 'Разминка' : period === 1 ? '1-й Тайм' : period === 2 ? 'Перерыв' : period === 3 ? '2-й Тайм' : period === 4 ? 'Перерыв (ДВ)' : period === 5 ? 'Доп. время 1' : period === 6 ? 'Доп. время 2' : period === 7 ? '⚽ Пенальти' : 'Завершён'}</Text>
             </View>
-            <View style={styles.headerInfo}><Text style={styles.matchTitle}>{match.team_home} vs {match.team_away}</Text></View>
+            <View style={styles.headerInfo}><Text style={styles.matchTitle} numberOfLines={1}>{match.team_home} vs {match.team_away}</Text></View>
         </View>
 
-        <View style={styles.scoreboard}>
+        <View style={[styles.scoreboard, compactUi && styles.scoreboardCompact]}>
             <View style={styles.teamControl}>
-                <TouchableOpacity style={[styles.btnAction, {borderColor: '#e31e24'}]} onPress={() => openEventMenu('home')}>{logoHome ? <Image source={{ uri: resolveLogoUri(logoHome) || undefined }} style={{width: 60, height: 60, resizeMode: 'contain'}} /> : <Text style={styles.btnActionText}>⚡</Text>}</TouchableOpacity>
-                <Text style={styles.scoreText}>{score.home}</Text><Text style={styles.teamName}>{match.team_home}</Text>{sportType === 'futsal' && <Text style={styles.foulText}>Фолы: {fouls.home}</Text>}
+                <TouchableOpacity style={[styles.btnAction, { borderColor: '#e31e24', width: actionBtnSize, height: actionBtnSize, borderRadius: actionBtnSize / 2 }]} onPress={() => openEventMenu('home')}>{logoHome ? <Image source={{ uri: resolveLogoUri(logoHome) || undefined }} style={{width: actionLogoSize, height: actionLogoSize, resizeMode: 'contain'}} /> : <Text style={[styles.btnActionText, compactUi && { fontSize: 24 }]}>⚡</Text>}</TouchableOpacity>
+                <Text style={[styles.scoreText, { fontSize: scoreFontSize }]}>{score.home}</Text><Text style={styles.teamName} numberOfLines={1}>{match.team_home}</Text>{sportType === 'futsal' && <Text style={styles.foulText}>Фолы: {fouls.home}</Text>}
             </View>
-            <Text style={styles.vs}>:</Text>
+            <Text style={[styles.vs, compactUi && { fontSize: 28, marginBottom: 12 }]}>:</Text>
             <View style={styles.teamControl}>
-                <TouchableOpacity style={[styles.btnAction, {borderColor: '#1a4384'}]} onPress={() => openEventMenu('away')}>{logoAway ? <Image source={{ uri: resolveLogoUri(logoAway) || undefined }} style={{width: 60, height: 60, resizeMode: 'contain'}} /> : <Text style={styles.btnActionText}>⚡</Text>}</TouchableOpacity>
-                <Text style={styles.scoreText}>{score.away}</Text><Text style={styles.teamName}>{match.team_away}</Text>{sportType === 'futsal' && <Text style={styles.foulText}>Фолы: {fouls.away}</Text>}
+                <TouchableOpacity style={[styles.btnAction, { borderColor: '#1a4384', width: actionBtnSize, height: actionBtnSize, borderRadius: actionBtnSize / 2 }]} onPress={() => openEventMenu('away')}>{logoAway ? <Image source={{ uri: resolveLogoUri(logoAway) || undefined }} style={{width: actionLogoSize, height: actionLogoSize, resizeMode: 'contain'}} /> : <Text style={[styles.btnActionText, compactUi && { fontSize: 24 }]}>⚡</Text>}</TouchableOpacity>
+                <Text style={[styles.scoreText, { fontSize: scoreFontSize }]}>{score.away}</Text><Text style={styles.teamName} numberOfLines={1}>{match.team_away}</Text>{sportType === 'futsal' && <Text style={styles.foulText}>Фолы: {fouls.away}</Text>}
             </View>
         </View>
 
         <View style={styles.footer}>
-         {period === 0 && <TouchableOpacity style={styles.btnStart} onPress={() => handleTimerAction('start_h1')}><Text style={styles.btnStartText}>НАЧАТЬ 1-Й ТАЙМ</Text></TouchableOpacity>}
-            {(period === 1 || period === 3) && isTimerRunning && <TouchableOpacity style={styles.btnPause} onPress={() => handleTimerAction('pause')}><Text style={styles.btnPauseText}>⏸ ПАУЗА</Text></TouchableOpacity>}
-            {(period === 1 || period === 3) && !isTimerRunning && (<View style={{flexDirection: 'row', gap: 20}}><TouchableOpacity style={styles.btnResume} onPress={() => handleTimerAction('resume')}><Text style={styles.btnResumeText}>▶ ИГРАТЬ</Text></TouchableOpacity><TouchableOpacity style={styles.btnEndPeriod} onPress={() => handleTimerAction(period === 1 ? 'end_h1' : 'end_match')}><Text style={styles.btnEndPeriodText}>{period === 1 ? 'ЗАКОНЧИТЬ ТАЙМ' : 'ЗАКОНЧИТЬ МАТЧ'}</Text></TouchableOpacity></View>)}
-            {period === 2 && <TouchableOpacity style={styles.btnStart} onPress={() => handleTimerAction('start_h2')}><Text style={styles.btnStartText}>НАЧАТЬ 2-Й ТАЙМ</Text></TouchableOpacity>}
+         <View style={styles.footerTimerRow}>
+         {period === 0 && <TouchableOpacity style={[styles.btnStart, { paddingVertical: primaryBtnPadV, paddingHorizontal: primaryBtnPadH }]} onPress={() => handleTimerAction('start_h1')}><Text style={[styles.btnStartText, { fontSize: primaryBtnFont + 2 }]}>НАЧАТЬ 1-Й ТАЙМ</Text></TouchableOpacity>}
+            {(period === 1 || period === 3) && isTimerRunning && <TouchableOpacity style={[styles.btnPause, { paddingVertical: primaryBtnPadV, paddingHorizontal: primaryBtnPadH }]} onPress={() => handleTimerAction('pause')}><Text style={[styles.btnPauseText, { fontSize: primaryBtnFont + 2 }]}>⏸ ПАУЗА</Text></TouchableOpacity>}
+            {(period === 1 || period === 3) && !isTimerRunning && (<>
+              <TouchableOpacity style={[styles.btnResume, { paddingVertical: primaryBtnPadV, paddingHorizontal: primaryBtnPadH }]} onPress={() => handleTimerAction('resume')}><Text style={[styles.btnResumeText, { fontSize: primaryBtnFont }]}>▶ ИГРАТЬ</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.btnEndPeriod, { paddingVertical: primaryBtnPadV, paddingHorizontal: primaryBtnPadH }]} onPress={() => handleTimerAction(period === 1 ? 'end_h1' : 'end_match')}><Text style={[styles.btnEndPeriodText, { fontSize: primaryBtnFont }]}>{period === 1 ? 'ЗАКОНЧИТЬ ТАЙМ' : 'ЗАКОНЧИТЬ МАТЧ'}</Text></TouchableOpacity>
+            </>)}
+            {period === 2 && <TouchableOpacity style={[styles.btnStart, { paddingVertical: primaryBtnPadV, paddingHorizontal: primaryBtnPadH }]} onPress={() => handleTimerAction('start_h2')}><Text style={[styles.btnStartText, { fontSize: primaryBtnFont + 2 }]}>НАЧАТЬ 2-Й ТАЙМ</Text></TouchableOpacity>}
             
             {/* Перерыв перед ДВ или пенальти */}
             {period === 4 && (
-                <View style={{flexDirection:'row', gap:12, alignItems:'center', flexWrap:'wrap', justifyContent:'center'}}>
+                <>
                     {drawEt && (
-                        <TouchableOpacity style={[styles.btnStart, {backgroundColor:'#1a4384', paddingHorizontal:20}]} onPress={() => handleTimerAction('start_et1')}>
-                            <Text style={styles.btnStartText}>▶ ДОП. ВРЕМЯ</Text>
+                        <TouchableOpacity style={[styles.btnStart, {backgroundColor:'#1a4384', paddingVertical: primaryBtnPadV, paddingHorizontal:20}]} onPress={() => handleTimerAction('start_et1')}>
+                            <Text style={[styles.btnStartText, { fontSize: primaryBtnFont }]}>▶ ДОП. ВРЕМЯ</Text>
                         </TouchableOpacity>
                     )}
                     {drawPen && !drawEt && (
-                        <TouchableOpacity style={[styles.btnStart, {backgroundColor:'#e31e24', paddingHorizontal:20}]} onPress={() => handleTimerAction('start_pen')}>
-                            <Text style={styles.btnStartText}>⚽ ПЕНАЛЬТИ</Text>
+                        <TouchableOpacity style={[styles.btnStart, {backgroundColor:'#e31e24', paddingVertical: primaryBtnPadV, paddingHorizontal:20}]} onPress={() => handleTimerAction('start_pen')}>
+                            <Text style={[styles.btnStartText, { fontSize: primaryBtnFont }]}>⚽ ПЕНАЛЬТИ</Text>
                         </TouchableOpacity>
                     )}
-                    <TouchableOpacity style={[styles.btnStart, {backgroundColor:'#555', paddingHorizontal:20}]} onPress={() => handleTimerAction('end_match')}>
-                        <Text style={styles.btnStartText}>🏁 ЗАВЕРШИТЬ</Text>
+                    <TouchableOpacity style={[styles.btnStart, {backgroundColor:'#555', paddingVertical: primaryBtnPadV, paddingHorizontal:20}]} onPress={() => handleTimerAction('end_match')}>
+                        <Text style={[styles.btnStartText, { fontSize: primaryBtnFont }]}>🏁 ЗАВЕРШИТЬ</Text>
                     </TouchableOpacity>
-                </View>
+                </>
             )}
             {/* Доп. время 1 */}
             {period === 5 && isTimerRunning && (
-                <TouchableOpacity style={styles.btnPause} onPress={() => handleTimerAction('pause')}>
-                    <Text style={styles.btnPauseText}>⏸ ПАУЗА (ДВ1)</Text>
+                <TouchableOpacity style={[styles.btnPause, { paddingVertical: primaryBtnPadV, paddingHorizontal: primaryBtnPadH }]} onPress={() => handleTimerAction('pause')}>
+                    <Text style={[styles.btnPauseText, { fontSize: primaryBtnFont }]}>⏸ ПАУЗА (ДВ1)</Text>
                 </TouchableOpacity>
             )}
             {period === 5 && !isTimerRunning && (
-                <View style={{flexDirection:'row', gap:12}}>
-                    <TouchableOpacity style={styles.btnResume} onPress={() => handleTimerAction('resume')}>
-                        <Text style={styles.btnResumeText}>▶ ИГРАТЬ</Text>
+                <>
+                    <TouchableOpacity style={[styles.btnResume, { paddingVertical: primaryBtnPadV, paddingHorizontal: primaryBtnPadH }]} onPress={() => handleTimerAction('resume')}>
+                        <Text style={[styles.btnResumeText, { fontSize: primaryBtnFont }]}>▶ ИГРАТЬ</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.btnEndPeriod} onPress={() => handleTimerAction('end_et1')}>
-                        <Text style={styles.btnEndPeriodText}>КОНЕЦ ДВ1</Text>
+                    <TouchableOpacity style={[styles.btnEndPeriod, { paddingVertical: primaryBtnPadV, paddingHorizontal: primaryBtnPadH }]} onPress={() => handleTimerAction('end_et1')}>
+                        <Text style={[styles.btnEndPeriodText, { fontSize: primaryBtnFont }]}>КОНЕЦ ДВ1</Text>
                     </TouchableOpacity>
-                </View>
+                </>
             )}
             {/* Доп. время 2 */}
             {period === 6 && isTimerRunning && (
-                <TouchableOpacity style={styles.btnPause} onPress={() => handleTimerAction('pause')}>
-                    <Text style={styles.btnPauseText}>⏸ ПАУЗА (ДВ2)</Text>
+                <TouchableOpacity style={[styles.btnPause, { paddingVertical: primaryBtnPadV, paddingHorizontal: primaryBtnPadH }]} onPress={() => handleTimerAction('pause')}>
+                    <Text style={[styles.btnPauseText, { fontSize: primaryBtnFont }]}>⏸ ПАУЗА (ДВ2)</Text>
                 </TouchableOpacity>
             )}
             {period === 6 && !isTimerRunning && (
-                <View style={{flexDirection:'row', gap:12}}>
-                    <TouchableOpacity style={styles.btnResume} onPress={() => handleTimerAction('resume')}>
-                        <Text style={styles.btnResumeText}>▶ ИГРАТЬ</Text>
+                <>
+                    <TouchableOpacity style={[styles.btnResume, { paddingVertical: primaryBtnPadV, paddingHorizontal: primaryBtnPadH }]} onPress={() => handleTimerAction('resume')}>
+                        <Text style={[styles.btnResumeText, { fontSize: primaryBtnFont }]}>▶ ИГРАТЬ</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.btnEndPeriod} onPress={() => handleTimerAction('end_et2')}>
-                        <Text style={styles.btnEndPeriodText}>КОНЕЦ ДВ2</Text>
+                    <TouchableOpacity style={[styles.btnEndPeriod, { paddingVertical: primaryBtnPadV, paddingHorizontal: primaryBtnPadH }]} onPress={() => handleTimerAction('end_et2')}>
+                        <Text style={[styles.btnEndPeriodText, { fontSize: primaryBtnFont }]}>КОНЕЦ ДВ2</Text>
                     </TouchableOpacity>
-                </View>
+                </>
             )}
             {/* Серия пенальти */}
             {period === 7 && (
-                <View style={{flexDirection:'row', gap:10, alignItems:'center', flexWrap:'wrap', justifyContent:'center'}}>
+                <>
                     <Text style={{color:'#aaa', fontSize:13, fontWeight:'bold'}}>Пен: {penScore.home} : {penScore.away}</Text>
                     <TouchableOpacity style={[styles.btnStart, {backgroundColor:'#e31e24', paddingHorizontal:16, paddingVertical:10}]}
                         onPress={() => { const ns = {...penScore, home: penScore.home+1}; setPenScore(ns); sendUpdate({}, 'penalty_shootout', null, match.team_home_id, false); }}>
@@ -2311,20 +2362,21 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                     }}>
                         <Text style={[styles.btnEndPeriodText, {fontSize:13}]}>🏁 ЗАВЕРШИТЬ</Text>
                     </TouchableOpacity>
-                </View>
+                </>
             )}
             {/* Матч завершён */}
             {period === 8 && (
-                <View style={{flexDirection:'row', gap:20, alignItems:'center'}}>
-                    <View style={styles.btnFinished}><Text style={styles.btnStartText}>МАТЧ ЗАВЕРШЕН</Text></View>
-                    <TouchableOpacity style={[styles.btnStart, {backgroundColor: '#333', borderColor: 'white', borderWidth:1}]} onPress={onBack}>
-                        <Text style={styles.btnStartText}>К РАСПИСАНИЮ 📅</Text>
+                <>
+                    <View style={[styles.btnFinished, { paddingVertical: primaryBtnPadV, paddingHorizontal: primaryBtnPadH }]}><Text style={[styles.btnStartText, { fontSize: primaryBtnFont }]}>МАТЧ ЗАВЕРШЕН</Text></View>
+                    <TouchableOpacity style={[styles.btnStart, {backgroundColor: '#333', borderColor: 'white', borderWidth:1, paddingVertical: primaryBtnPadV, paddingHorizontal: primaryBtnPadH}]} onPress={onBack}>
+                        <Text style={[styles.btnStartText, { fontSize: primaryBtnFont }]}>К РАСПИСАНИЮ 📅</Text>
                     </TouchableOpacity>
-                </View>
+                </>
             )}
+         </View>
 
             {period !== 4 && (
-                <View style={{flexDirection: 'row', alignItems: 'center', marginLeft: 10, gap: 10}}>
+                <View style={styles.footerStreamRow}>
                     <TouchableOpacity style={styles.btnMicSettings} onPress={openStreamSettings}>
                         <Text style={styles.btnMicText}>⚙</Text>
                     </TouchableOpacity>
@@ -2354,7 +2406,7 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                     )}
                     {canStream && (
                     <>
-                    <TouchableOpacity style={[styles.btnMic, isMuted && styles.btnMicOff]} onPress={toggleMic}>
+                    <TouchableOpacity style={styles.btnMic, isMuted && styles.btnMicOff} onPress={toggleMic}>
                         <Text style={styles.btnMicText}>{isMuted ? "🔇" : "🎙️"}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={[styles.btnStream, isStreaming && styles.btnStreamActive, isLoading && { opacity: 0.5 }]} onPress={handleToggleStream} disabled={isLoading}>
@@ -2441,8 +2493,10 @@ const styles = StyleSheet.create({
   exitBtnPos: { position: 'absolute', top: 40, right: 30, backgroundColor: '#333', padding: 10, borderRadius: 8 },
   screenTopBar: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 8,
     zIndex: 100,
     elevation: 100,
   },
@@ -2452,6 +2506,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: '100%',
     paddingHorizontal: 24,
+    minHeight: 0,
   },
   topBarBtn: {
     paddingVertical: 10,
@@ -2506,14 +2561,20 @@ const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     padding: 10,
     zIndex: 20,
     elevation: 20,
   },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  matchUiColumn: {
+    flex: 1,
+    width: '100%',
+    justifyContent: 'space-between',
+    minHeight: 0,
+  },
+  header: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 6, width: '100%' },
   backButton: { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8 },
-  matchTitle: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+  matchTitle: { color: 'white', fontWeight: 'bold', fontSize: 16, flexShrink: 1 },
   waafLinkRow: { alignSelf: 'center', marginTop: 4, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(26,67,132,0.85)', borderRadius: 8 },
   waafLinkText: { color: '#a8d4ff', fontSize: 12, fontWeight: '600' },
   streamHealthText: { alignSelf: 'center', marginTop: 4, color: '#8f8', fontSize: 11, fontWeight: '600' },
@@ -2533,15 +2594,40 @@ const styles = StyleSheet.create({
   timerText: { color: 'white', fontSize: 28, fontWeight: '900', fontVariant: ['tabular-nums'] },
   timerTextAdded: { color: '#ffb347' },
   periodText: { color: '#e31e24', fontSize: 10, fontWeight: 'bold', textTransform: 'uppercase' },
-  scoreboard: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 40 },
-  teamControl: { alignItems: 'center' },
+  scoreboard: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 40, flexShrink: 1 },
+  scoreboardCompact: { gap: 16 },
+  teamControl: { alignItems: 'center', maxWidth: '42%' },
   btnAction: { width: 90, height: 90, borderRadius: 45, borderWidth: 4, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', marginBottom: 5, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 4.65, elevation: 8 },
   btnActionText: { fontSize: 32 },
   foulText: { color: '#FFD700', fontSize: 14, fontWeight: 'bold', marginTop: 4, textShadowColor: 'rgba(0, 0, 0, 0.75)', textShadowOffset: {width: -1, height: 1}, textShadowRadius: 2 },
   scoreText: { color: 'white', fontSize: 70, fontWeight: '900' },
   teamName: { color: 'white', fontSize: 14, fontWeight: 'bold', maxWidth: 150, textAlign: 'center' },
   vs: { color: 'white', fontSize: 40, opacity: 0.8, marginBottom: 30 },
-  footer: { alignItems: 'center', marginBottom: 20, flexDirection: 'row', justifyContent: 'center' },
+  footer: {
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 4,
+    gap: 8,
+    flexShrink: 0,
+  },
+  footerTimerRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 10,
+    maxWidth: '100%',
+    paddingHorizontal: 4,
+  },
+  footerStreamRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    maxWidth: '100%',
+    paddingHorizontal: 4,
+  },
   btnStart: { backgroundColor: '#e31e24', paddingVertical: 15, paddingHorizontal: 40, borderRadius: 30, elevation: 5 },
   btnStartText: { color: 'white', fontWeight: '900', fontSize: 18 },
   btnPause: { backgroundColor: '#ffcc00', paddingVertical: 15, paddingHorizontal: 40, borderRadius: 30 },
@@ -2551,7 +2637,7 @@ const styles = StyleSheet.create({
   btnEndPeriod: { backgroundColor: '#1a4384', paddingVertical: 15, paddingHorizontal: 30, borderRadius: 30 },
   btnEndPeriodText: { color: 'white', fontWeight: '900', fontSize: 16 },
   btnFinished: { backgroundColor: 'gray', paddingVertical: 15, paddingHorizontal: 40, borderRadius: 30 },
-  btnStream: { backgroundColor: '#333', paddingVertical: 15, paddingHorizontal: 20, borderRadius: 30, marginLeft: 15, borderWidth: 1, borderColor: '#555', justifyContent: 'center', alignItems: 'center' },
+  btnStream: { backgroundColor: '#333', paddingVertical: 12, paddingHorizontal: 18, borderRadius: 30, borderWidth: 1, borderColor: '#555', justifyContent: 'center', alignItems: 'center', minWidth: 72 },
   btnStreamActive: { backgroundColor: '#e31e24', borderColor: '#ff0000', shadowColor: "red", shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.5, shadowRadius: 10, elevation: 5 },
   btnStreamText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
   modalCenter: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.85)' },
@@ -2569,7 +2655,7 @@ const styles = StyleSheet.create({
   playerNumBadge: { width: 34, height: 34, borderRadius: 17, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   playerNumText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
   playerName: { color: 'white', fontWeight: 'bold', fontSize: 18 },
-  headerInfo: { flex: 1, alignItems: 'flex-end' },
+  headerInfo: { flexGrow: 1, flexShrink: 1, alignItems: 'flex-end', minWidth: 72 },
   btnMic: {
     width: 50,
     height: 50,
