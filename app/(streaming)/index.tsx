@@ -343,7 +343,7 @@ function PinEntryScreen({ match, onSuccess, onBack }) {
             </TouchableOpacity>
             
             <Text style={styles.title}>ШАГ 3: КОД ДОСТУПА</Text>
-            <Text style={styles.subTitle}>{match.team_home} vs {match.team_away}</Text>
+            <Text style={styles.subTitle}>{(() => { const n = resolveMatchTeamNames(match); return `${n.home} vs ${n.away}`; })()}</Text>
             
             <TextInput 
                 style={styles.inputBig} 
@@ -810,6 +810,7 @@ export default function App() {
               match={selectedMatch}
               matchRoster={matchRoster}
               onBack={isStandaloneSession ? handleBackToCabinet : handleBackToSchedule}
+              onMatchUpdate={setSelectedMatch}
               accessCode={matchAccessCode}
               sessionToken={matchSessionToken}
               operatorToken={operatorToken}
@@ -834,7 +835,8 @@ function RosterEditScreen({ match, onSave, onBack, accessCode = null, sessionTok
     const [loadingPlayers, setLoadingPlayers] = useState(false);
     const opAuth = { sessionToken, accessCode, operatorToken };
 
-    const currentTeamName = activeTab === 'home' ? match.team_home : match.team_away;
+    const teamNames = resolveMatchTeamNames(match);
+    const currentTeamName = activeTab === 'home' ? teamNames.home : teamNames.away;
     const currentTeamId = activeTab === 'home' ? match.team_home_id : match.team_away_id;
 
     useEffect(() => {
@@ -895,8 +897,8 @@ function RosterEditScreen({ match, onSave, onBack, accessCode = null, sessionTok
                 <View style={{width: 50}} />
             </View>
             <View style={styles.tabs}>
-                <TouchableOpacity style={[styles.tab, activeTab === 'home' && styles.activeTab]} onPress={() => setActiveTab('home')}><Text style={[styles.tabText, activeTab === 'home' && styles.activeTabText]}>{match.team_home}</Text></TouchableOpacity>
-                <TouchableOpacity style={[styles.tab, activeTab === 'away' && styles.activeTab]} onPress={() => setActiveTab('away')}><Text style={[styles.tabText, activeTab === 'away' && styles.activeTabText]}>{match.team_away}</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.tab, activeTab === 'home' && styles.activeTab]} onPress={() => setActiveTab('home')}><Text style={[styles.tabText, activeTab === 'home' && styles.activeTabText]}>{teamNames.home}</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.tab, activeTab === 'away' && styles.activeTab]} onPress={() => setActiveTab('away')}><Text style={[styles.tabText, activeTab === 'away' && styles.activeTabText]}>{teamNames.away}</Text></TouchableOpacity>
             </View>
             <ScrollView style={styles.playerList}>
                 {loadingPlayers && <ActivityIndicator color="#4a90e2" style={{ marginVertical: 20 }} />}
@@ -925,7 +927,26 @@ function RosterEditScreen({ match, onSave, onBack, accessCode = null, sessionTok
 // ==================================================
 // MATCH CONTROL SCREEN (ГОЛЫ + АССИСТЕНТЫ + JAVA ЗВУК)
 // ==================================================
-function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, sessionToken = null, operatorToken = null, tokenType = null, standaloneTier = null, isStandaloneSession = false }) {
+function MatchControlScreen({ match: matchProp, matchRoster, onBack, onMatchUpdate = null, accessCode = null, sessionToken = null, operatorToken = null, tokenType = null, standaloneTier = null, isStandaloneSession = false }) {
+  const [match, setMatch] = useState(matchProp);
+  useEffect(() => {
+    setMatch(matchProp);
+  }, [matchProp?.id]);
+  useEffect(() => {
+    if (!matchProp?.id) return;
+    let cancelled = false;
+    fetch(`${API_URL}/api/match/${matchProp.id}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data || data.error) return;
+        const next = { ...matchProp, ...data };
+        setMatch(next);
+        if (typeof onMatchUpdate === 'function') onMatchUpdate(next);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [matchProp?.id]);
+  const teamNames = resolveMatchTeamNames(match);
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   // Landscape phones / small tablets: keep controls on-screen
@@ -1236,6 +1257,8 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
     cameraMountKey,
     match.team_home,
     match.team_away,
+    match.computed_home,
+    match.computed_away,
     match.teamHome,
     match.teamAway,
     match.logo_home,
@@ -2254,18 +2277,18 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
               </Text>
               <Text style={styles.periodText}>{period === 0 ? 'Разминка' : period === 1 ? '1-й Тайм' : period === 2 ? 'Перерыв' : period === 3 ? '2-й Тайм' : period === 4 ? 'Перерыв (ДВ)' : period === 5 ? 'Доп. время 1' : period === 6 ? 'Доп. время 2' : period === 7 ? '⚽ Пенальти' : 'Завершён'}</Text>
             </View>
-            <View style={styles.headerInfo}><Text style={styles.matchTitle} numberOfLines={1}>{match.team_home} vs {match.team_away}</Text></View>
+            <View style={styles.headerInfo}><Text style={styles.matchTitle} numberOfLines={1}>{teamNames.home} vs {teamNames.away}</Text></View>
         </View>
 
         <View style={[styles.scoreboard, compactUi && styles.scoreboardCompact]}>
             <View style={styles.teamControl}>
                 <TouchableOpacity style={[styles.btnAction, { borderColor: '#e31e24', width: actionBtnSize, height: actionBtnSize, borderRadius: actionBtnSize / 2 }]} onPress={() => openEventMenu('home')}>{logoHome ? <Image source={{ uri: resolveLogoUri(logoHome) || undefined }} style={{width: actionLogoSize, height: actionLogoSize, resizeMode: 'contain'}} /> : <Text style={[styles.btnActionText, compactUi && { fontSize: 24 }]}>⚡</Text>}</TouchableOpacity>
-                <Text style={[styles.scoreText, { fontSize: scoreFontSize }]}>{score.home}</Text><Text style={styles.teamName} numberOfLines={1}>{match.team_home}</Text>{sportType === 'futsal' && <Text style={styles.foulText}>Фолы: {fouls.home}</Text>}
+                <Text style={[styles.scoreText, { fontSize: scoreFontSize }]}>{score.home}</Text><Text style={styles.teamName} numberOfLines={1}>{teamNames.home}</Text>{sportType === 'futsal' && <Text style={styles.foulText}>Фолы: {fouls.home}</Text>}
             </View>
             <Text style={[styles.vs, compactUi && { fontSize: 28, marginBottom: 12 }]}>:</Text>
             <View style={styles.teamControl}>
                 <TouchableOpacity style={[styles.btnAction, { borderColor: '#1a4384', width: actionBtnSize, height: actionBtnSize, borderRadius: actionBtnSize / 2 }]} onPress={() => openEventMenu('away')}>{logoAway ? <Image source={{ uri: resolveLogoUri(logoAway) || undefined }} style={{width: actionLogoSize, height: actionLogoSize, resizeMode: 'contain'}} /> : <Text style={[styles.btnActionText, compactUi && { fontSize: 24 }]}>⚡</Text>}</TouchableOpacity>
-                <Text style={[styles.scoreText, { fontSize: scoreFontSize }]}>{score.away}</Text><Text style={styles.teamName} numberOfLines={1}>{match.team_away}</Text>{sportType === 'futsal' && <Text style={styles.foulText}>Фолы: {fouls.away}</Text>}
+                <Text style={[styles.scoreText, { fontSize: scoreFontSize }]}>{score.away}</Text><Text style={styles.teamName} numberOfLines={1}>{teamNames.away}</Text>{sportType === 'futsal' && <Text style={styles.foulText}>Фолы: {fouls.away}</Text>}
             </View>
         </View>
 
@@ -2335,11 +2358,11 @@ function MatchControlScreen({ match, matchRoster, onBack, accessCode = null, ses
                     <Text style={{color:'#aaa', fontSize:13, fontWeight:'bold'}}>Пен: {penScore.home} : {penScore.away}</Text>
                     <TouchableOpacity style={[styles.btnStart, {backgroundColor:'#e31e24', paddingHorizontal:16, paddingVertical:10}]}
                         onPress={() => { const ns = {...penScore, home: penScore.home+1}; setPenScore(ns); sendUpdate({}, 'penalty_shootout', null, match.team_home_id, false); }}>
-                        <Text style={[styles.btnStartText, {fontSize:13}]}>+1 {match.team_home}</Text>
+                        <Text style={[styles.btnStartText, {fontSize:13}]}>+1 {teamNames.home}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={[styles.btnStart, {backgroundColor:'#1a4384', paddingHorizontal:16, paddingVertical:10}]}
                         onPress={() => { const ns = {...penScore, away: penScore.away+1}; setPenScore(ns); sendUpdate({}, 'penalty_shootout', null, match.team_away_id, false); }}>
-                        <Text style={[styles.btnStartText, {fontSize:13}]}>+1 {match.team_away}</Text>
+                        <Text style={[styles.btnStartText, {fontSize:13}]}>+1 {teamNames.away}</Text>
                     </TouchableOpacity>
                     {/* 🔥 ЗАВЕРШИТЬ С СОХРАНЕНИЕМ СЧЁТА ПЕНАЛЬТИ */}
                     <TouchableOpacity style={[styles.btnEndPeriod, {paddingHorizontal:16, paddingVertical:10}]} onPress={() => {
