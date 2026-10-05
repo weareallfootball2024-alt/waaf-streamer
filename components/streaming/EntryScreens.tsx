@@ -111,8 +111,10 @@ const styles = StyleSheet.create({
   privacyText: { color: '#ccc', fontWeight: 'bold', fontSize: 12 },
   topBar: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 8,
     zIndex: 100,
     elevation: 100,
   },

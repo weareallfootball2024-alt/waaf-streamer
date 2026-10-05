@@ -9,6 +9,7 @@ type Props = {
   max: number;
   opacity?: number;
   disabled?: boolean;
+  compact?: boolean;
   onSelect: (preset: number) => void;
 };
 
@@ -23,6 +24,7 @@ export function ZoomPresetButtons({
   max,
   opacity = 1,
   disabled = false,
+  compact = false,
   onSelect,
 }: Props) {
   const available = useMemo(
@@ -41,7 +43,11 @@ export function ZoomPresetButtons({
 
   return (
     <View
-      style={[styles.wrap, { opacity: disabled ? Math.min(opacity, 0.35) : opacity }]}
+      style={[
+        styles.wrap,
+        compact && styles.wrapCompact,
+        { opacity: disabled ? Math.min(opacity, 0.35) : opacity },
+      ]}
       pointerEvents={disabled ? 'none' : 'box-none'}
     >
       {ordered.map((preset) => {
@@ -49,7 +55,7 @@ export function ZoomPresetButtons({
         return (
           <TouchableOpacity
             key={preset}
-            style={[styles.btn, isActive && styles.btnActive]}
+            style={[styles.btn, compact && styles.btnCompact, isActive && styles.btnActive]}
             onPress={() => onSelect(preset)}
             disabled={disabled}
             activeOpacity={0.75}
@@ -74,6 +80,11 @@ const styles = StyleSheet.create({
     gap: 8,
     zIndex: 20,
   },
+  wrapCompact: {
+    marginTop: -90,
+    gap: 5,
+    right: 4,
+  },
   btn: {
     minWidth: 44,
     height: 36,
@@ -84,6 +95,11 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.35)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  btnCompact: {
+    minWidth: 38,
+    height: 30,
+    paddingHorizontal: 6,
   },
   btnActive: {
     backgroundColor: 'rgba(74,144,226,0.92)',
